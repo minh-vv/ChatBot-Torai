@@ -62,6 +62,7 @@ const ChatInterface = ({ project, onToggleSidebar, isSidebarOpen }) => {
   const [copiedMessages, setCopiedMessages] = useState(new Set()); // Track copied messages
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -280,13 +281,80 @@ const ChatInterface = ({ project, onToggleSidebar, isSidebarOpen }) => {
     }
   };
 
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // Create a temporary message for the user
+      const tempId = Date.now();
+      const userMsg = {
+        id: tempId,
+        role: 'user',
+        content: `Uploading ${file.name}...`,
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, userMsg]);
+      setIsTyping(true);
+
+      const response = await fetch('http://127.0.0.1:8000/api/upload/', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+
+      // Update the message with the uploaded file
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === tempId) {
+          return {
+            ...msg,
+            content: `Uploaded: ${file.name}`,
+            fileUrl: `http://127.0.0.1:8000${data.file_url}`,
+            fileType: file.type.startsWith('image/') ? 'image' : 'file'
+          };
+        }
+        return msg;
+      }));
+
+      // Simulate AI response
+      setTimeout(() => {
+        const aiMsg = {
+          id: Date.now() + 1,
+          role: 'ai',
+          content: `I have received your file: ${file.name}.`,
+          timestamp: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, aiMsg]);
+        setIsTyping(false);
+      }, 1000);
+
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'system',
+        content: 'Failed to upload file.',
+        timestamp: new Date().toISOString()
+      }]);
+      setIsTyping(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-white relative font-sans">
       {/* Chat Header */}
       <div className="h-14 border-b border-slate-100 flex items-center justify-between px-4 bg-white z-10 shrink-0">
         <div className="flex items-center gap-3">
           {/* Sidebar Toggle Button (Visible on all screens) */}
-          <button 
+          <button
             onClick={onToggleSidebar}
             className="p-2 -ml-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-md transition-colors"
             title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
@@ -298,11 +366,11 @@ const ChatInterface = ({ project, onToggleSidebar, isSidebarOpen }) => {
           <span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded-full whitespace-nowrap hidden sm:inline-block">GPT-4o</span>
         </div>
         <div className="flex items-center gap-1 sm:gap-2">
-           <button
-             onClick={() => setIsSearchOpen(true)}
-             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors"
-             title="Search messages"
-           >
+          <button
+            onClick={() => setIsSearchOpen(true)}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-colors"
+            title="Search messages"
+          >
             <Search className="w-5 h-5" />
           </button>
           <div className="relative more-menu-container">
@@ -439,19 +507,32 @@ const ChatInterface = ({ project, onToggleSidebar, isSidebarOpen }) => {
               <div className={cn("flex flex-col max-w-[85%] sm:max-w-[80%]", msg.role === 'user' ? "items-end" : "items-start")}>
                 <div className={cn(
                   "px-5 py-3.5 shadow-sm text-[15px] leading-relaxed",
-                  msg.role === 'user' 
-                    ? "bg-[#0E3B8C] text-white rounded-2xl rounded-tr-none" 
+                  msg.role === 'user'
+                    ? "bg-[#0E3B8C] text-white rounded-2xl rounded-tr-none"
                     : "bg-slate-50 border border-slate-100 text-slate-800 rounded-2xl rounded-tl-none"
                 )}>
                   <p className="whitespace-pre-wrap break-words">
                     {searchQuery ? highlightSearchText(msg.content, searchQuery) : msg.content}
                   </p>
-                  
+
+                  {msg.fileUrl && (
+                    <div className="mt-2">
+                      {msg.fileType === 'image' ? (
+                        <img src={msg.fileUrl} alt="Uploaded" className="max-w-full rounded-lg border border-slate-200" />
+                      ) : (
+                        <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-600 hover:underline">
+                          <FileText className="w-4 h-4" />
+                          Download File
+                        </a>
+                      )}
+                    </div>
+                  )}
+
                   {/* Suggestions for initial message */}
                   {msg.suggestions && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       {msg.suggestions.map((s, i) => (
-                        <button key={i} 
+                        <button key={i}
                           onClick={() => setInput(s)}
                           className="text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-full text-slate-600 hover:border-[#0E3B8C] hover:text-[#0E3B8C] transition-all"
                         >
@@ -562,18 +643,28 @@ const ChatInterface = ({ project, onToggleSidebar, isSidebarOpen }) => {
             className="w-full min-h-[50px] max-h-[150px] bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-24 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C] resize-none transition-all"
             rows={1}
           />
-          
+
           <div className="absolute bottom-2 right-2 flex items-center gap-1">
-             <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors" title="Attach file">
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+              title="Attach file"
+            >
               <Paperclip className="w-4 h-4" />
             </button>
-            <button 
+            <button
               onClick={handleSend}
               disabled={!input.trim() || isTyping}
               className={cn(
                 "p-2 rounded-lg transition-all duration-200",
                 input.trim() && !isTyping
-                  ? "bg-[#0E3B8C] text-white shadow-md hover:bg-blue-800 hover:shadow-lg transform hover:-translate-y-0.5" 
+                  ? "bg-[#0E3B8C] text-white shadow-md hover:bg-blue-800 hover:shadow-lg transform hover:-translate-y-0.5"
                   : "bg-slate-200 text-slate-400 cursor-not-allowed"
               )}
             >
