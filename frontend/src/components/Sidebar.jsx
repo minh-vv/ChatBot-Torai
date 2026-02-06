@@ -1,26 +1,69 @@
-import React from 'react';
-import { MessageSquare, Plus, Settings, LayoutDashboard, FileText, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { MessageSquare, Plus, Settings, LayoutDashboard, FileText, X, MoreHorizontal, Trash2, Pencil, Check, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const Sidebar = ({ 
   chatHistory, 
-  activeChatId, 
+  activeConversationId, 
   onSelectChat, 
   onNewChat,
+  onDeleteConversation,
+  onRenameConversation,
   isAdmin,
   onOpenAdmin,
   isOpen,
-  onClose
+  onClose,
+  user,
+  onLogout
 }) => {
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
+
   const groupedChats = {
     'Today': chatHistory.filter(c => c.group === 'Today'),
     'Yesterday': chatHistory.filter(c => c.group === 'Yesterday'),
     'Previous 7 Days': chatHistory.filter(c => c.group === 'Previous 7 Days'),
   };
 
+  const handleStartEdit = (chat, e) => {
+    e.stopPropagation();
+    setEditingId(chat.conversation_id);
+    setEditingTitle(chat.title);
+    setMenuOpenId(null);
+  };
+
+  const handleSaveEdit = (conversationId) => {
+    if (editingTitle.trim()) {
+      onRenameConversation(conversationId, editingTitle.trim());
+    }
+    setEditingId(null);
+    setEditingTitle('');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingTitle('');
+  };
+
+  const handleDelete = (conversationId, e) => {
+    e.stopPropagation();
+    setMenuOpenId(null);
+    onDeleteConversation(conversationId);
+  };
+
+  const handleKeyDown = (e, conversationId) => {
+    if (e.key === 'Enter') {
+      handleSaveEdit(conversationId);
+    } else if (e.key === 'Escape') {
+      handleCancelEdit();
+    }
+  };
+
   return (
     <>
-      {/* Mobile Overlay: Only shows when open on mobile */}
+      {/* Mobile Overlay */}
       <div 
         className={cn(
           "fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-300",
@@ -32,17 +75,11 @@ const Sidebar = ({
       {/* Sidebar Container */}
       <div className={cn(
         "bg-slate-50 border-r border-slate-200 h-full flex flex-col shadow-xl md:shadow-none transition-all duration-300 ease-in-out overflow-hidden z-50",
-        // Mobile Logic (Fixed position, slide in/out)
         "fixed inset-y-0 left-0",
         isOpen ? "translate-x-0" : "-translate-x-full",
-        
-        // Desktop Logic (Relative position, width collapse)
-        // When open: relative, translate-0, width-64
-        // When closed: relative, translate-0, width-0
         "md:relative md:translate-x-0",
         isOpen ? "md:w-64" : "md:w-0 md:border-none"
       )}>
-        {/* Inner Content Container - width fixed to 64 (16rem) so content doesn't squash during transition */}
         <div className="w-64 h-full flex flex-col">
           
           {/* Header */}
@@ -53,10 +90,9 @@ const Sidebar = ({
                     <FileText className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h1 className="font-bold text-lg leading-tight">ProjectDoc</h1>
+                    <h1 className="font-bold text-lg leading-tight">ChatBot</h1>
                   </div>
                 </div>
-                {/* Mobile Close Button */}
                 <button onClick={onClose} className="md:hidden p-1 text-slate-400 hover:text-slate-600">
                   <X className="w-6 h-6" />
                 </button>
@@ -67,7 +103,7 @@ const Sidebar = ({
               className="w-full flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-3 py-2.5 rounded-md hover:border-[#0E3B8C] hover:text-[#0E3B8C] hover:shadow-sm transition-all text-sm font-medium"
             >
               <Plus className="w-4 h-4" />
-              <span>New Conversation</span>
+              <span>Cuộc trò chuyện mới</span>
             </button>
           </div>
 
@@ -76,32 +112,116 @@ const Sidebar = ({
             {Object.entries(groupedChats).map(([groupName, chats]) => (
               chats.length > 0 && (
                 <div key={groupName}>
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-2">{groupName}</h3>
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-2">
+                    {groupName === 'Today' ? 'Hôm nay' : groupName === 'Yesterday' ? 'Hôm qua' : '7 ngày trước'}
+                  </h3>
                   <div className="space-y-1">
                     {chats.map((chat) => (
-                      <button
-                        key={chat.id}
-                        onClick={() => onSelectChat(chat.id)}
+                      <div
+                        key={chat.conversation_id}
                         className={cn(
-                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 group",
-                          activeChatId === chat.id 
+                          "group relative w-full flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200",
+                          activeConversationId === chat.conversation_id 
                             ? "bg-[#0E3B8C] text-white shadow-md" 
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         )}
                       >
-                        <MessageSquare className={cn(
-                          "w-4 h-4",
-                          activeChatId === chat.id ? "text-white" : "text-slate-400 group-hover:text-slate-600"
-                        )} />
-                        <span className="truncate flex-1 text-left">
-                          {chat.title}
-                        </span>
-                      </button>
+                        {editingId === chat.conversation_id ? (
+                          // Edit mode
+                          <div className="flex items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => handleKeyDown(e, chat.conversation_id)}
+                              className="flex-1 px-2 py-1 text-sm rounded border border-slate-300 text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0E3B8C]"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSaveEdit(chat.conversation_id)}
+                              className="p-1 text-green-600 hover:bg-green-100 rounded"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="p-1 text-slate-400 hover:bg-slate-200 rounded"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          // Normal mode
+                          <>
+                            <button
+                              onClick={() => onSelectChat(chat.conversation_id)}
+                              className="flex items-center gap-3 flex-1 min-w-0"
+                            >
+                              <MessageSquare className={cn(
+                                "w-4 h-4 flex-shrink-0",
+                                activeConversationId === chat.conversation_id ? "text-white" : "text-slate-400 group-hover:text-slate-600"
+                              )} />
+                              <span className="truncate text-left">
+                                {chat.title}
+                              </span>
+                            </button>
+                            
+                            {/* More options button */}
+                            <div className="relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setMenuOpenId(menuOpenId === chat.conversation_id ? null : chat.conversation_id);
+                                }}
+                                className={cn(
+                                  "p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity",
+                                  activeConversationId === chat.conversation_id 
+                                    ? "hover:bg-white/20 text-white" 
+                                    : "hover:bg-slate-200 text-slate-400"
+                                )}
+                              >
+                                <MoreHorizontal className="w-4 h-4" />
+                              </button>
+                              
+                              {/* Dropdown menu */}
+                              {menuOpenId === chat.conversation_id && (
+                                <div 
+                                  className="absolute right-0 top-full mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    onClick={(e) => handleStartEdit(chat, e)}
+                                    className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    Đổi tên
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDelete(chat.conversation_id, e)}
+                                    className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Xóa
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
               )
             ))}
+            
+            {chatHistory.length === 0 && (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                Chưa có cuộc trò chuyện nào.
+                <br />
+                Bấm "Cuộc trò chuyện mới" để bắt đầu.
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -116,20 +236,57 @@ const Sidebar = ({
               </button>
             )}
             
-            <div className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-slate-50 cursor-pointer transition-colors">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                JD
+            {/* User Info */}
+            <div className="relative">
+              <div 
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                  {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <p className="text-sm font-medium text-slate-900 truncate">{user?.name || 'Người dùng'}</p>
+                  <p className="text-xs text-slate-500 truncate">{user?.email || ''}</p>
+                </div>
+                <Settings className="w-4 h-4 text-slate-400 hover:text-slate-600" />
               </div>
-              <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-medium text-slate-900 truncate">John Doe</p>
-                <p className="text-xs text-slate-500 truncate">Admin</p>
-              </div>
-              <Settings className="w-4 h-4 text-slate-400 hover:text-slate-600" />
+
+              {/* User Menu Dropdown */}
+              {showUserMenu && (
+                <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1">
+                  <div className="px-3 py-2 border-b border-slate-100">
+                    <p className="text-xs text-slate-400">Đăng nhập với</p>
+                    <p className="text-sm text-slate-700 truncate">{user?.email}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      onLogout && onLogout();
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Đăng xuất
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
         </div>
       </div>
+
+      {/* Click outside to close menus */}
+      {(menuOpenId || showUserMenu) && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => {
+            setMenuOpenId(null);
+            setShowUserMenu(false);
+          }}
+        />
+      )}
     </>
   );
 };

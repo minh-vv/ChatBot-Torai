@@ -1,26 +1,125 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
+import AuthPage from './components/AuthPage';
+import { 
+  getUserId, 
+  getConversations, 
+  deleteConversation, 
+  renameConversation,
+  isAuthenticated,
+  getStoredUser,
+  logout,
+  getCurrentUser
+} from './services/api';
 
-// Mock Data for Chat History (ChatGPT style)
-const MOCK_HISTORY = [
-  { id: 1, title: 'HR Policy Questions', group: 'Today', timestamp: new Date().toISOString() },
-  { id: 2, title: 'React Component Help', group: 'Today', timestamp: new Date().toISOString() },
-  { id: 3, title: 'Q1 Budget Analysis', group: 'Yesterday', timestamp: new Date().toISOString() },
-  { id: 4, title: 'Server Config Error', group: 'Previous 7 Days', timestamp: new Date().toISOString() },
-  { id: 5, title: 'Marketing Strategy Brainstorm', group: 'Previous 7 Days', timestamp: new Date().toISOString() },
-];
+// Helper function to categorize conversations by date
+const categorizeByDate = (conversations) => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  return conversations.map(conv => {
+    // Dify timestamps are in seconds, JS Date expects milliseconds
+    const updatedAt = (conv.updated_at || conv.created_at) * 1000;
+    const convDate = new Date(updatedAt);
+    let group = 'Previous 7 Days';
+    
+    if (convDate >= today) {
+      group = 'Today';
+    } else if (convDate >= yesterday) {
+      group = 'Yesterday';
+    }
+    
+    return {
+      ...conv,
+      id: conv.id,
+      conversation_id: conv.id,
+      title: conv.name || 'Cuộc trò chuyện mới',
+      group,
+      timestamp: updatedAt
+    };
+  });
+};
 
 function App() {
   const [currentView, setCurrentView] = useState('chat');
-  const [chatHistory, setChatHistory] = useState(MOCK_HISTORY);
-  const [activeChatId, setActiveChatId] = useState(1);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [activeConversationId, setActiveConversationId] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   
   // Responsive Sidebar State
-  // Default: Open on Desktop (>768px), Closed on Mobile
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [chatKey, setChatKey] = useState(Date.now()); // Key to force re-render ChatInterface
 
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (isAuthenticated()) {
+        const storedUser = getStoredUser();
+        if (storedUser) {
+          setUser(storedUser);
+          setUserId(storedUser.user_id);
+          setIsLoggedIn(true);
+          
+          // Verify token is still valid
+          const currentUser = await getCurrentUser();
+          if (!currentUser) {
+            // Token expired, logout
+            handleLogout();
+            return;
+          }
+          
+          // Load conversations
+          try {
+            const conversations = await getConversations();
+            const categorized = categorizeByDate(conversations);
+            setChatHistory(categorized);
+          } catch (error) {
+            console.error('Error loading conversations:', error);
+          }
+        }
+      }
+      setIsLoading(false);
+    };
+    
+    checkAuth();
+  }, []);
+
+  // Handle successful authentication
+  const handleAuthSuccess = async (userData) => {
+    setUser(userData);
+    setUserId(userData.user_id);
+    setIsLoggedIn(true);
+    
+    // Load conversations
+    try {
+      const conversations = await getConversations();
+      const categorized = categorizeByDate(conversations);
+      setChatHistory(categorized);
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+    }
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    await logout();
+    setUser(null);
+    setUserId(null);
+    setIsLoggedIn(false);
+    setChatHistory([]);
+    setActiveConversationId(null);
+  };
+
+  // Handle window resize
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 768) {
@@ -30,38 +129,111 @@ function App() {
       }
     };
     
-    // Set initial state based on screen size
     handleResize();
-
-    // Optional: Add resize listener if you want auto-collapse on resize
-    // window.addEventListener('resize', handleResize);
-    // return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const isAdmin = true; 
 
+  // Refresh conversations from server
+  const refreshConversations = useCallback(async () => {
+    try {
+      const conversations = await getConversations();
+      const categorized = categorizeByDate(conversations);
+      setChatHistory(categorized);
+    } catch (error) {
+      console.error('Error refreshing conversations:', error);
+    }
+  }, []);
+
+  // Handle new chat - reset to empty conversation
   const handleNewChat = () => {
-    const newChatId = Date.now();
-    const newChat = {
-      id: newChatId,
-      title: 'New Conversation',
-      group: 'Today',
-      timestamp: new Date().toISOString()
-    };
-    setChatHistory([newChat, ...chatHistory]);
-    setActiveChatId(newChatId);
+    setActiveConversationId(null);
+    setChatKey(Date.now()); // Force ChatInterface to re-render
     setCurrentView('chat');
     
-    // On mobile, auto-close sidebar after creating new chat
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
-  const activeChatTitle = chatHistory.find(c => c.id === activeChatId)?.title || "New Conversation";
+  // Handle selecting a chat from sidebar
+  const handleSelectChat = (conversationId) => {
+    setActiveConversationId(conversationId);
+    if (window.innerWidth < 768) setIsSidebarOpen(false);
+  };
+
+  // Handle deleting a conversation
+  const handleDeleteConversation = async (conversationId) => {
+    if (!window.confirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) {
+      return;
+    }
+    
+    try {
+      await deleteConversation(conversationId);
+      setChatHistory(prev => prev.filter(c => c.conversation_id !== conversationId));
+      
+      // If deleted the active conversation, reset
+      if (activeConversationId === conversationId) {
+        setActiveConversationId(null);
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      alert('Không thể xóa cuộc trò chuyện. Vui lòng thử lại.');
+    }
+  };
+
+  // Handle renaming a conversation
+  const handleRenameConversation = async (conversationId, newName) => {
+    try {
+      await renameConversation(conversationId, newName, false);
+      setChatHistory(prev => prev.map(c => 
+        c.conversation_id === conversationId 
+          ? { ...c, title: newName }
+          : c
+      ));
+    } catch (error) {
+      console.error('Error renaming conversation:', error);
+      alert('Không thể đổi tên cuộc trò chuyện. Vui lòng thử lại.');
+    }
+  };
+
+  // Callback when a new conversation is created from ChatInterface
+  const handleConversationCreated = useCallback((newConversationId, title) => {
+    const nowTs = Date.now();
+    const newConv = {
+      id: newConversationId,
+      conversation_id: newConversationId,
+      title: title || 'Cuộc trò chuyện mới',
+      group: 'Today',
+      timestamp: nowTs
+    };
+    
+    setChatHistory(prev => [newConv, ...prev]);
+    setActiveConversationId(newConversationId);
+  }, []);
+
+  const activeChat = chatHistory.find(c => c.conversation_id === activeConversationId);
+  const activeChatTitle = activeChat?.title || "New Conversation";
 
   const virtualProjectContext = {
     name: activeChatTitle,
-    files: 152, 
+    conversationId: activeConversationId,
+    userId: userId
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#0E3B8C] border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-600">Đang tải...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show auth page if not logged in
+  if (!isLoggedIn) {
+    return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white text-slate-900 font-sans">
@@ -69,17 +241,17 @@ function App() {
       {currentView === 'chat' && (
         <Sidebar 
           chatHistory={chatHistory}
-          activeChatId={activeChatId}
-          onSelectChat={(id) => {
-            setActiveChatId(id);
-            // On mobile, auto-close sidebar after selection
-            if (window.innerWidth < 768) setIsSidebarOpen(false);
-          }}
+          activeConversationId={activeConversationId}
+          onSelectChat={handleSelectChat}
           onNewChat={handleNewChat}
+          onDeleteConversation={handleDeleteConversation}
+          onRenameConversation={handleRenameConversation}
           isAdmin={isAdmin}
           onOpenAdmin={() => setCurrentView('admin')}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
+          user={user}
+          onLogout={handleLogout}
         />
       )}
 
@@ -91,7 +263,11 @@ function App() {
           />
         ) : (
           <ChatInterface 
+            key={activeConversationId || `new-chat-${chatKey}`}
             project={virtualProjectContext}
+            conversationId={activeConversationId}
+            userId={userId}
+            onConversationCreated={handleConversationCreated}
             isSidebarOpen={isSidebarOpen}
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           />
