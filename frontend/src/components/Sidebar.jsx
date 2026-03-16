@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { MessageSquare, Plus, Settings, LayoutDashboard, FileText, X, MoreHorizontal, Trash2, Pencil, Check, LogOut } from 'lucide-react';
+import { MessageSquare, Plus, Settings, LayoutDashboard, FileText, X, MoreHorizontal, Trash2, Pencil, Check, LogOut, Users, User, BarChart3 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const Sidebar = ({ 
   chatHistory, 
@@ -11,11 +12,15 @@ const Sidebar = ({
   onRenameConversation,
   isAdmin,
   onOpenAdmin,
+  onOpenUsers,
+  onOpenFeedback,
+  onOpenProfile,
   isOpen,
   onClose,
   user,
   onLogout
 }) => {
+  const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -25,6 +30,12 @@ const Sidebar = ({
     'Today': chatHistory.filter(c => c.group === 'Today'),
     'Yesterday': chatHistory.filter(c => c.group === 'Yesterday'),
     'Previous 7 Days': chatHistory.filter(c => c.group === 'Previous 7 Days'),
+  };
+
+  const groupLabel = (key) => {
+    if (key === 'Today') return t('today');
+    if (key === 'Yesterday') return t('yesterday');
+    return t('last7Days');
   };
 
   const handleStartEdit = (chat, e) => {
@@ -103,7 +114,7 @@ const Sidebar = ({
               className="w-full flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-3 py-2.5 rounded-md hover:border-[#0E3B8C] hover:text-[#0E3B8C] hover:shadow-sm transition-all text-sm font-medium"
             >
               <Plus className="w-4 h-4" />
-              <span>Cuộc trò chuyện mới</span>
+              <span>{t('newChat')}</span>
             </button>
           </div>
 
@@ -113,7 +124,7 @@ const Sidebar = ({
               chats.length > 0 && (
                 <div key={groupName}>
                   <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-2">
-                    {groupName === 'Today' ? 'Hôm nay' : groupName === 'Yesterday' ? 'Hôm qua' : '7 ngày trước'}
+                    {groupLabel(groupName)}
                   </h3>
                   <div className="space-y-1">
                     {chats.map((chat) => (
@@ -127,7 +138,6 @@ const Sidebar = ({
                         )}
                       >
                         {editingId === chat.conversation_id ? (
-                          // Edit mode
                           <div className="flex items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="text"
@@ -151,7 +161,6 @@ const Sidebar = ({
                             </button>
                           </div>
                         ) : (
-                          // Normal mode
                           <>
                             <button
                               onClick={() => onSelectChat(chat.conversation_id)}
@@ -166,7 +175,6 @@ const Sidebar = ({
                               </span>
                             </button>
                             
-                            {/* More options button */}
                             <div className="relative">
                               <button
                                 onClick={(e) => {
@@ -183,7 +191,6 @@ const Sidebar = ({
                                 <MoreHorizontal className="w-4 h-4" />
                               </button>
                               
-                              {/* Dropdown menu */}
                               {menuOpenId === chat.conversation_id && (
                                 <div 
                                   className="absolute right-0 top-full mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1"
@@ -194,14 +201,14 @@ const Sidebar = ({
                                     className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                                   >
                                     <Pencil className="w-3.5 h-3.5" />
-                                    Đổi tên
+                                    {t('rename')}
                                   </button>
                                   <button
                                     onClick={(e) => handleDelete(chat.conversation_id, e)}
                                     className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
-                                    Xóa
+                                    {t('delete')}
                                   </button>
                                 </div>
                               )}
@@ -217,9 +224,9 @@ const Sidebar = ({
             
             {chatHistory.length === 0 && (
               <div className="text-center py-8 text-slate-400 text-sm">
-                Chưa có cuộc trò chuyện nào.
+                {t('noChatYet')}
                 <br />
-                Bấm "Cuộc trò chuyện mới" để bắt đầu.
+                {t('startNewChat')}
               </div>
             )}
           </div>
@@ -227,13 +234,29 @@ const Sidebar = ({
           {/* Footer */}
           <div className="p-3 border-t border-slate-200 bg-white flex-shrink-0">
             {isAdmin && (
-              <button 
-                onClick={onOpenAdmin}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-100 text-sm text-slate-700 font-medium transition-colors mb-2 border border-transparent hover:border-slate-200"
-              >
-                <LayoutDashboard className="w-4 h-4 text-[#0E3B8C]" />
-                <span>Knowledge Base</span>
-              </button>
+              <>
+                <button 
+                  onClick={onOpenAdmin}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-100 text-sm text-slate-700 font-medium transition-colors mb-1 border border-transparent hover:border-slate-200"
+                >
+                  <LayoutDashboard className="w-4 h-4 text-[#0E3B8C]" />
+                  <span>{t('knowledgeBase')}</span>
+                </button>
+                <button 
+                  onClick={onOpenUsers}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-100 text-sm text-slate-700 font-medium transition-colors mb-1 border border-transparent hover:border-slate-200"
+                >
+                  <Users className="w-4 h-4 text-[#0E3B8C]" />
+                  <span>{t('userManagement')}</span>
+                </button>
+                <button 
+                  onClick={onOpenFeedback}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-100 text-sm text-slate-700 font-medium transition-colors mb-2 border border-transparent hover:border-slate-200"
+                >
+                  <BarChart3 className="w-4 h-4 text-[#0E3B8C]" />
+                  <span>{t('feedbackMgmt')}</span>
+                </button>
+              </>
             )}
             
             {/* User Info */}
@@ -246,7 +269,7 @@ const Sidebar = ({
                   {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
                 </div>
                 <div className="flex-1 overflow-hidden">
-                  <p className="text-sm font-medium text-slate-900 truncate">{user?.name || 'Người dùng'}</p>
+                  <p className="text-sm font-medium text-slate-900 truncate">{user?.name || t('user')}</p>
                   <p className="text-xs text-slate-500 truncate">{user?.email || ''}</p>
                 </div>
                 <Settings className="w-4 h-4 text-slate-400 hover:text-slate-600" />
@@ -256,9 +279,19 @@ const Sidebar = ({
               {showUserMenu && (
                 <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1">
                   <div className="px-3 py-2 border-b border-slate-100">
-                    <p className="text-xs text-slate-400">Đăng nhập với</p>
+                    <p className="text-xs text-slate-400">{t('loggedInAs')}</p>
                     <p className="text-sm text-slate-700 truncate">{user?.email}</p>
                   </div>
+                  <button
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      onOpenProfile && onOpenProfile();
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <User className="w-4 h-4" />
+                    {t('profile')}
+                  </button>
                   <button
                     onClick={() => {
                       setShowUserMenu(false);
@@ -267,7 +300,7 @@ const Sidebar = ({
                     className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                   >
                     <LogOut className="w-4 h-4" />
-                    Đăng xuất
+                    {t('logout')}
                   </button>
                 </div>
               )}

@@ -30,7 +30,8 @@ const saveAuthData = (data) => {
   localStorage.setItem('user_data', JSON.stringify({
     user_id: data.user_id,
     email: data.email,
-    name: data.name
+    name: data.name,
+    role: data.role || 'user'
   }));
 };
 
@@ -158,7 +159,8 @@ export const updateProfile = async (name) => {
     if (storedUser) {
       localStorage.setItem('user_data', JSON.stringify({
         ...storedUser,
-        name: data.name
+        name: data.name,
+        role: data.role || storedUser.role
       }));
     }
     
@@ -749,6 +751,108 @@ export const deleteMinioDocument = async (fileName, toolName = 'default') => {
     return await response.json();
   } catch (error) {
     console.error('Error deleting MinIO document:', error);
+    throw error;
+  }
+};
+
+// ==================== ADMIN USER MANAGEMENT ====================
+
+export const getAdminUsers = async (search = '', role = '') => {
+  try {
+    let url = `${API_BASE_URL}/admin/users/?`;
+    if (search) url += `search=${encodeURIComponent(search)}&`;
+    if (role) url += `role=${encodeURIComponent(role)}&`;
+    
+    const response = await fetch(url, { headers: getAuthHeaders() });
+    
+    if (!response.ok) {
+      if (response.status === 403) throw new Error('Không có quyền truy cập');
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    throw error;
+  }
+};
+
+export const updateAdminUser = async (userId, updates) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(updates)
+    });
+    
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Cập nhật thất bại');
+    }
+    return data;
+  } catch (error) {
+    console.error('Error updating user:', error);
+    throw error;
+  }
+};
+
+// ==================== ADMIN FEEDBACK MANAGEMENT ====================
+
+export const getAdminFeedbacks = async (rating = '', search = '', userId = '') => {
+  try {
+    let url = `${API_BASE_URL}/admin/feedbacks/?`;
+    if (rating) url += `rating=${encodeURIComponent(rating)}&`;
+    if (search) url += `search=${encodeURIComponent(search)}&`;
+    if (userId) url += `user_id=${encodeURIComponent(userId)}&`;
+
+    const response = await fetch(url, { headers: getAuthHeaders() });
+
+    if (!response.ok) {
+      if (response.status === 403) throw new Error('No access');
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching feedbacks:', error);
+    throw error;
+  }
+};
+
+export const deleteAdminFeedback = async (feedbackId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/feedbacks/`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ feedback_id: feedbackId })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Delete failed');
+    }
+    return true;
+  } catch (error) {
+    console.error('Error deleting feedback:', error);
+    throw error;
+  }
+};
+
+export const deleteAdminUser = async (userId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Xóa thất bại');
+    }
+    return true;
+  } catch (error) {
+    console.error('Error deleting user:', error);
     throw error;
   }
 };

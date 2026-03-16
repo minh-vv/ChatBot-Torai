@@ -23,7 +23,7 @@ services:
       ELASTICACHE_PORT: "6379"
     volumes:
       - .:/app
-      - D:\Document\Code\Projects\Tool-use_Agent\Cache\stopwords_vi.txt:/app/stopwords_path.txt
+      - ./Cache/stopwords_vi.txt:/app/stopwords_path.txt
     depends_on:
       - qdrant
       - minio

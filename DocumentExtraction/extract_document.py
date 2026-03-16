@@ -32,7 +32,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
 from huggingface_hub import login
 hf_token = os.getenv("HF_TOKEN")
-login(hf_token)
+if hf_token:
+    login(hf_token)
 
 # OpenRouter config (optional). If USE_OPENROUTER is set to true (1/yes/true),
 # the extractor will call OpenRouter instead of Gemini for image descriptions.

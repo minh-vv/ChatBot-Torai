@@ -20,6 +20,9 @@ from .views import (
     KnowledgeDocumentListView,
     KnowledgeDocumentDetailView,
     KnowledgeStatsView,
+    AdminUserListView,
+    AdminUserDetailView,
+    AdminFeedbackListView,
 )
 
 urlpatterns = [
@@ -56,4 +59,11 @@ urlpatterns = [
     path('knowledge/<str:dataset_id>/', KnowledgeBaseDetailView.as_view(), name='knowledge-detail'),
     path('knowledge/<str:dataset_id>/documents/', KnowledgeDocumentListView.as_view(), name='knowledge-documents'),
     path('knowledge/<str:dataset_id>/documents/<str:document_id>/', KnowledgeDocumentDetailView.as_view(), name='knowledge-document-detail'),
+    
+    # Admin User Management
+    path('admin/users/', AdminUserListView.as_view(), name='admin-user-list'),
+    path('admin/users/<str:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
+    
+    # Admin Feedback Management
+    path('admin/feedbacks/', AdminFeedbackListView.as_view(), name='admin-feedback-list'),
 ]
