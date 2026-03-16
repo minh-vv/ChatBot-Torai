@@ -1,20 +1,91 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-env/
-venv/
-
-# Django
-db.sqlite3
-staticfiles/
-
-# Node
 node_modules/
-dist/
-
-# Environment variables
 .env
+npm-debug.log
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments and env files
+.env
+.env.*
+venv/
+venv*/
+.venv/
+ENV/
+env/
+.Python
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python tooling caches
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Docker overrides / local compose
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Local storage/state (Qdrant, MinIO, local outputs)
+/qdrant_storage/
+qdrant_storage/
+DocumentExtraction/qdrant_storage/
+DocumentExtraction/input/
+DocumentExtraction/output/
+minio_data/
+.minio.sys/
+
+# Production and Temp Files
+request.py
+main_prod.py
+docker-compose.prod.yml
+
+# Media and User Uploads
+backend/media/
+media/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Misc
+*.egg
+note.txt
+
+# SSH keys
+*.pem
+*.ppk
+
 
 
