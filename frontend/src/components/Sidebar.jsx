@@ -18,7 +18,9 @@ const Sidebar = ({
   isOpen,
   onClose,
   user,
-  onLogout
+  onLogout,
+  width = 260,
+  onStartResize
 }) => {
   const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -84,15 +86,23 @@ const Sidebar = ({
       />
 
       {/* Sidebar Container */}
-      <div className={cn(
-        "bg-slate-50 border-r border-slate-200 h-full flex flex-col shadow-xl md:shadow-none transition-all duration-300 ease-in-out overflow-hidden z-50",
-        "fixed inset-y-0 left-0",
-        isOpen ? "translate-x-0" : "-translate-x-full",
-        "md:relative md:translate-x-0",
-        isOpen ? "md:w-64" : "md:w-0 md:border-none"
-      )}>
-        <div className="w-64 h-full flex flex-col">
+      <div 
+        className={cn(
+          "bg-slate-50 border-r border-slate-200 h-full flex flex-col shadow-xl md:shadow-none transition-transform duration-300 ease-in-out z-50 overflow-hidden",
+          "fixed inset-y-0 left-0",
+          isOpen ? "translate-x-0" : "-translate-x-full",
+          "md:relative md:translate-x-0"
+        )}
+        style={{ width: isOpen ? (typeof window !== 'undefined' && window.innerWidth < 768 ? '100vw' : `${width}px`) : '0px' }}
+      >
+        <div className="h-full flex flex-col w-full relative overflow-hidden">
           
+          {/* Resize Handle (Desktop Only) */}
+          <div 
+            onMouseDown={onStartResize}
+            className="hidden md:block absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[#0E3B8C]/30 active:bg-[#0E3B8C]/50 transition-colors z-50"
+          />
+
           {/* Header */}
           <div className="p-4 border-b border-slate-200 flex-shrink-0">
              <div className="flex items-center justify-between mb-4">

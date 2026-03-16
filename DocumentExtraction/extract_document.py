@@ -38,7 +38,7 @@ if hf_token:
 # OpenRouter config (optional). If USE_OPENROUTER is set to true (1/yes/true),
 # the extractor will call OpenRouter instead of Gemini for image descriptions.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() in ("1", "true", "yes")
 
@@ -494,12 +494,12 @@ class DocumentExtraction:
         logger.info(f"✅ Hoàn tất xử lý file: {file_path}")
         return file_name
 
+
 if __name__ == "__main__":
-    dir = os.getenv("DOCUMENT_FOLDER")
+    # dir = os.getenv("DOCUMENT_FOLDER")
+    dir = r"D:\Document\Code\Projects\KnowledgeClassifier\data\text_extraction"
     input_dir = Path(dir) / "input"
     output_dir = Path(dir) / "output"
     output_dir.mkdir(exist_ok=True)
     extractor = DocumentExtraction(output_dir=output_dir, mode="dev")
-    # extractor = DocumentExtraction(mode="prod")
-    extractor.extract_all_infor(r"D:\Document\Code\Projects\Tool-use_Agent\DocumentExtraction\input\scribe_test.pdf")
-    # print(extractor._generate_description(r"D:\Document\Code\Projects\Tool-use_Agent\DocumentExtraction\output\scribetest\images\picture-2.png"))
+    extractor.extract_all_infor(r"D:\Document\Code\Projects\KnowledgeClassifier\data\text_extraction\input\【出張報告】Hung Hon(4K) Limited 訪問(2018.10.31) - コピー.pdf", tool_name="ToRAI")

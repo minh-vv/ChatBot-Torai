@@ -99,6 +99,16 @@ class MinioClientWrapper:
         except S3Error as e:
             logger.error("Download failed for %s from bucket %s: %s", object_name, bucket_type, e)
             return False
+            
+    def object_exists(self, bucket_name: str, object_name: str) -> bool:
+        """
+        Check if an object exists in the bucket.
+        """
+        try:
+            self.client.stat_object(bucket_name, object_name)
+            return True
+        except Exception:
+            return False
         
     def get_object(self, bucket_type: str, object_name: str):
         """
@@ -355,16 +365,16 @@ class MinioClientWrapper:
             base_minio_folder = os.getenv("MINIO_FOLDER", "").strip("/")
             pref = (folder or "").strip("/")
 
-            # Build full prefix
-            if base_minio_folder:
-                if pref and not pref.startswith(base_minio_folder):
-                    full_prefix = f"{base_minio_folder}/{pref}"
-                elif not pref:
-                    full_prefix = base_minio_folder
-                else:
-                    full_prefix = pref
-            else:
-                full_prefix = pref
+            # # Build full prefix
+            # if base_minio_folder:
+            #     if pref and not pref.startswith(base_minio_folder):
+            #         full_prefix = f"{base_minio_folder}/{pref}"
+            #     elif not pref:
+            #         full_prefix = base_minio_folder
+            #     else:
+            #         full_prefix = pref
+            # else:
+            full_prefix = pref
 
             full_prefix = full_prefix.strip("/")
             if not full_prefix:

@@ -99,7 +99,7 @@ class QdrantVectorstore:
             logger.error("⚠️ Error deleting points with filename '%s': %s", filename, e)
             return False
 
-    def ingest_to_qdrant(self, collection_name, file_name):
+    def ingest_to_qdrant(self, collection_name, file_name, tool_name):
         """Nạp dữ liệu JSON vào Qdrant. Hỗ trợ mode 'dev' (đọc file local) và 'prod' (đọc từ storage)."""
         self.create_collection(collection_name)
         total_points = 0
@@ -145,8 +145,7 @@ class QdrantVectorstore:
                         logger.error("⚠️ Lỗi upsert vào Qdrant cho %s: %s", data_path, e)
 
         elif self.mode == "prod":
-            base_storage_folder = getattr(self, "storage_folder", "") or ""
-            prefix = f"{base_storage_folder}/{file_name}" if base_storage_folder else file_name
+            prefix = f"{tool_name}/{file_name}"
             prefix = prefix.strip("/")
 
             try:
@@ -309,7 +308,8 @@ if __name__ == "__main__":
     output_dir = Path(dir) / "output"
     output_dir.mkdir(exist_ok=True)
     vectorstore = QdrantVectorstore(host="127.0.0.1", port="6333", output_dir=output_dir, mode="dev")
-    vectorstore.delete_collection(collection_name=os.getenv("COLLECTION_NAME"))
+    print(vectorstore.search(collection_name=os.getenv("COLLECTION_NAME"), query="gann chart", image_description=""))
+    # vectorstore.delete_collection(collection_name=os.getenv("COLLECTION_NAME"))
     # vectorstore.create_collection(collection_name="keyword_testing")
     # vectorstore.ingest_to_qdrant(collection_name="tool_use_agent", file_name="scribe_test")
     # logger.info(vectorstore.search(collection_name="tool_use_agent", query="Hướng dẫn cách đặt xe."))

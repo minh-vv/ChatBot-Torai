@@ -6,12 +6,11 @@ from typing import List
 import uuid
 from dotenv import load_dotenv
 import logging
-
 load_dotenv()
 
 # Module-level constants loaded from environment
 DIFY_API_KEY = os.getenv("DIFY_API_KEY")
-DIFY_BASE_URL = os.getenv("DIFY_BASE_URL")
+DIFY_BASE_URL = os.getenv("DIFY_BASE_URL", "http://localhost:5001/v1")
 
 # Check and fix Dify URL if running in Docker
 if DIFY_BASE_URL and "localhost" in DIFY_BASE_URL:

@@ -34,6 +34,8 @@ const AdminDashboard = ({ onBack }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showExistModal, setShowExistModal] = useState(false);
+  const [existingFileInfo, setExistingFileInfo] = useState(null);
   const [newKBName, setNewKBName] = useState('');
   const [newKBDescription, setNewKBDescription] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -79,30 +81,70 @@ const AdminDashboard = ({ onBack }) => {
         getMinioDocuments(kbName)
       ]);
       
-      const minioMapped = minioDocs.map(m => {
-        const filename = m.object_name.split('/').pop();
-        return {
-          id: m.object_name,
-          document_id: m.object_name,
-          name: filename,
-          file_type: filename.split('.').pop().toLowerCase(),
-          file_size: m.size,
-          file_size_display: formatFileSize(m.size),
-          status: 'ready',
-          uploaded_by: 'MinIO',
-          created_at: m.last_modified,
-          isMinio: true
-        };
+      const sanitizeFilename = (nameToSanitize) => {
+        if (!nameToSanitize) return '';
+        // Same logic as Python's _folder_name_from_filename
+        const filename = nameToSanitize.split('/').pop();
+        const lastDotIndex = filename.lastIndexOf('.');
+        const ext = lastDotIndex !== -1 ? filename.substring(lastDotIndex) : '';
+        const base = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
+        
+        const noAccents = base.normalize('NFKD').replace(/[\u0300-\u036f]/g, "");
+        const cleanName = noAccents.replace(/[^A-Za-z0-9\s_]/g, '');
+        const sanitizedBase = cleanName.trim().split(/\s+/).join('_');
+        
+        return (sanitizedBase + ext).toLowerCase();
+      };
+
+      // Map unique documents (prefer Django for metadata)
+      const uniqueDocsMap = new Map();
+
+      // 1. First Pass: Add Django documents. Lowercase name is key.
+      djangoDocs.forEach(d => {
+        const uploaderName = typeof d.uploaded_by === 'object' 
+          ? d.uploaded_by?.name || d.uploaded_by?.email || 'User' 
+          : d.uploaded_by || 'System';
+        
+        uniqueDocsMap.set(d.name.toLowerCase(), {
+          ...d,
+          file_size_display: d.file_size_display || formatFileSize(d.file_size),
+          uploader_name: uploaderName,
+          sanitizedName: sanitizeFilename(d.name),
+          isDjango: true
+        });
       });
 
-      const combined = [...minioMapped];
-      djangoDocs.forEach(d => {
-        if (!combined.some(c => c.name === d.name)) {
-          combined.push(d);
+      minioDocs.forEach(m => {
+        const mFilename = m.object_name.split('/').pop();
+        const mKey = mFilename.toLowerCase();
+        const mSanitized = sanitizeFilename(mFilename);
+        
+        const alreadyInDjango = Array.from(uniqueDocsMap.values()).some(d => 
+          d.name.toLowerCase() === mKey || 
+          d.sanitizedName.toLowerCase() === mSanitized
+        );
+        
+        if (!alreadyInDjango && !uniqueDocsMap.has(mKey)) {
+          uniqueDocsMap.set(mKey, {
+            id: m.object_name,
+            document_id: m.object_name,
+            name: mFilename,
+            file_type: mFilename.split('.').pop().toLowerCase(),
+            file_size: m.size,
+            file_size_display: formatFileSize(m.size),
+            status: 'ready',
+            uploaded_by: 'MinIO',
+            uploader_name: 'MinIO',
+            created_at: m.last_modified,
+            isMinio: true,
+            isDjango: false,
+            sanitizedName: mSanitized
+          });
         }
       });
 
-      setDocuments(combined);
+      // Convert back to array
+      setDocuments(Array.from(uniqueDocsMap.values()));
     } catch (error) {
       console.error('Error loading documents:', error);
       try {
@@ -197,6 +239,14 @@ const AdminDashboard = ({ onBack }) => {
       try {
         const result = await uploadKnowledgeDocument(selectedKB.dataset_id, file, null, selectedKB.name);
         
+        if (result && result.status === 'exists') {
+          setDocuments(prev => prev.filter(d => d.document_id !== tempId));
+          setExistingFileInfo({ file, datasetId: selectedKB.dataset_id, kbName: selectedKB.name });
+          setShowExistModal(true);
+          continue; 
+        }
+
+
         setDocuments(prev => prev.map(doc => 
           doc.document_id === tempId ? result : doc
         ));
@@ -211,6 +261,49 @@ const AdminDashboard = ({ onBack }) => {
     
     setIsUploading(false);
     loadData();
+  };
+
+  const handleConfirmOverwrite = async (overwrite) => {
+    if (!existingFileInfo) return;
+    const { file, datasetId, kbName } = existingFileInfo;
+    
+    setShowExistModal(false);
+    
+    if (overwrite) {
+      setIsUploading(true);
+      const tempId = `temp-${Date.now()}-${file.name}`;
+      
+      setDocuments(prev => [{
+        id: tempId,
+        document_id: tempId,
+        name: file.name,
+        file_type: file.name.split('.').pop() || 'other',
+        file_size: file.size,
+        file_size_display: formatFileSize(file.size),
+        status: 'uploading',
+        uploaded_by: 'You',
+        created_at: new Date().toISOString()
+      }, ...prev]);
+      
+      try {
+        const result = await uploadKnowledgeDocument(datasetId, file, null, kbName, true);
+        setDocuments(prev => prev.map(doc => 
+          doc.document_id === tempId ? result : doc
+        ));
+      } catch (error) {
+        setDocuments(prev => prev.map(doc => 
+          doc.document_id === tempId 
+            ? { ...doc, status: 'failed', error_message: error.message }
+            : doc
+        ));
+      } finally {
+        setIsUploading(false);
+        setExistingFileInfo(null);
+        loadData();
+      }
+    } else {
+      setExistingFileInfo(null);
+    }
   };
 
   const handleDeleteDocument = async (doc) => {
@@ -471,7 +564,7 @@ const AdminDashboard = ({ onBack }) => {
                           <td className="px-6 py-4 text-slate-500">
                             <div className="flex flex-col">
                               <span>{formatDate(doc.created_at)}</span>
-                              <span className="text-[10px] text-slate-400">{t('by')} {doc.uploaded_by}</span>
+                              <span className="text-[10px] text-slate-400">{t('by')} {doc.uploader_name || doc.uploaded_by}</span>
                             </div>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -505,7 +598,7 @@ const AdminDashboard = ({ onBack }) => {
       {/* Create KB Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
               <h3 className="font-semibold text-slate-800">{t('createNewKB')}</h3>
               <button 
@@ -541,7 +634,7 @@ const AdminDashboard = ({ onBack }) => {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
@@ -554,6 +647,47 @@ const AdminDashboard = ({ onBack }) => {
                 className="px-4 py-2 bg-[#0E3B8C] text-white rounded-lg hover:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t('createNew')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File Exists Warning Modal */}
+      {showExistModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-slate-200 scale-in duration-300">
+            <div className="p-1.5 bg-yellow-500/10"></div>
+            <div className="p-8 text-center">
+              <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center mb-6 ring-8 ring-yellow-500/5">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">File already exists</h3>
+              <p className="text-slate-600 mb-8 leading-relaxed">
+                Tài liệu <span className="font-semibold text-slate-800">"{existingFileInfo?.file?.name}"</span> đã có trong hệ thống. Bạn có muốn sử dụng lại file cũ hay ghi đè bằng file mới?
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => handleConfirmOverwrite(false)}
+                  className="flex items-center justify-center gap-2 px-5 py-3 bg-white border-2 border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-[0.98]"
+                >
+                  <FolderOpen className="w-4 h-4" /> Sử dụng cũ
+                </button>
+                <button
+                  onClick={() => handleConfirmOverwrite(true)}
+                  className="flex items-center justify-center gap-2 px-5 py-3 bg-[#0E3B8C] text-white font-bold rounded-xl hover:bg-blue-800 shadow-lg shadow-blue-900/10 transition-all active:scale-[0.98]"
+                >
+                  <RefreshCw className="w-4 h-4" /> Ghi đè mới
+                </button>
+              </div>
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center">
+              <button 
+                onClick={() => setShowExistModal(false)}
+                className="text-slate-400 text-sm hover:text-slate-600 transition-colors py-1 px-4"
+              >
+                Đóng lại
               </button>
             </div>
           </div>

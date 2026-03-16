@@ -371,7 +371,7 @@ export const sendChatMessage = async (query, conversationId = '', files = [], on
             }
             
             if (data.done) {
-              onComplete && onComplete(fullAnswer, newConversationId, newMessageId);
+              onComplete && onComplete(fullAnswer, newConversationId, newMessageId, data.title);
             }
           } catch (e) {
             // Skip invalid JSON
@@ -665,7 +665,7 @@ export const getMinioDocuments = async (toolName = 'default') => {
 };
 
 // Upload document to knowledge base
-export const uploadKnowledgeDocument = async (datasetId, file, onProgress, toolName = 'default') => {
+export const uploadKnowledgeDocument = async (datasetId, file, onProgress, toolName = 'default', overwrite = false) => {
   const formData = new FormData();
   formData.append('file', file);
   
@@ -674,14 +674,23 @@ export const uploadKnowledgeDocument = async (datasetId, file, onProgress, toolN
     const fastApiFormData = new FormData();
     fastApiFormData.append('file', file);
     fastApiFormData.append('tool_name', toolName);
+    fastApiFormData.append('overwrite', overwrite);
     
     const fastApiUrl = DIFY_API_URL.replace('/dify', '');
-    fetch(`${fastApiUrl}/upload-file`, {
+    const fastApiResponse = await fetch(`${fastApiUrl}/upload-file`, {
       method: 'POST',
       body: fastApiFormData
-    }).catch(err => console.error('Error calling FastAPI upload:', err));
+    });
+    
+    const fastApiData = await fastApiResponse.json();
+    
+    // If file exists and we're not overwriting, return this status to the UI
+    if (fastApiData.status === 'exists') {
+      return fastApiData;
+    }
   } catch (err) {
     console.error('Error initiating FastAPI upload:', err);
+    // Continue anyway as Django might still work
   }
 
   try {
