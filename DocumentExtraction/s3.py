@@ -147,6 +147,16 @@ class S3ClientWrapper:
             logger.error("Download failed for %s from bucket %s: %s", object_name, bucket_type, e)
             return False
 
+    def object_exists(self, bucket_name: str, object_name: str) -> bool:
+        """
+        Check if an object exists in the S3 bucket.
+        """
+        try:
+            self.client.head_object(Bucket=bucket_name, Key=object_name)
+            return True
+        except ClientError:
+            return False
+
     def get_presigned_url(self, bucket_type: str, object_name: str, expires_seconds: int = 3600) -> str:
         """
         Generate presigned URL for file access.

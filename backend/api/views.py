@@ -830,7 +830,7 @@ class KnowledgeDocumentListView(APIView):
                         'word_count': doc.word_count,
                         'status': doc.status,
                         'error_message': doc.error_message,
-                        'uploaded_by': doc.uploaded_by.name if doc.uploaded_by else 'System',
+                        'uploaded_by': doc.uploaded_by.name or doc.uploaded_by.email if doc.uploaded_by else 'System',
                         'created_at': doc.created_at.isoformat()
                     }
                     for doc in documents
@@ -872,21 +872,38 @@ class KnowledgeDocumentListView(APIView):
         }
         file_type = file_type_map.get(extension, 'other')
         
-        # Generate unique document_id
-        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        # Try to find existing document(s) with same name in this KB
+        existing_docs = KnowledgeDocument.objects.filter(knowledge_base=kb, name=original_name)
         
-        # Create document record with 'uploading' status
-        doc = KnowledgeDocument.objects.create(
-            knowledge_base=kb,
-            document_id=document_id,
-            name=original_name,
-            file=file,
-            file_type=file_type,
-            file_size=file.size,
-            mime_type=file.content_type or '',
-            status='processing',
-            uploaded_by=user
-        )
+        if existing_docs.exists():
+            # Keep the first one and prepare to delete others
+            doc = existing_docs.first()
+            # Delete any extra duplicates that might have been created previously
+            existing_docs.exclude(id=doc.id).delete()
+            
+            doc.status = 'processing'
+            doc.file = file
+            doc.file_type = file_type
+            doc.file_size = file.size
+            doc.mime_type = file.content_type or ''
+            doc.uploaded_by = user
+            doc.save()
+        else:
+            # Generate unique document_id
+            document_id = f"doc-{uuid.uuid4().hex[:12]}"
+            
+            # Create document record with 'processing' status
+            doc = KnowledgeDocument.objects.create(
+                knowledge_base=kb,
+                document_id=document_id,
+                name=original_name,
+                file=file,
+                file_type=file_type,
+                file_size=file.size,
+                mime_type=file.content_type or '',
+                status='processing',
+                uploaded_by=user
+            )
         
         # Process document content (word count, etc.)
         try:

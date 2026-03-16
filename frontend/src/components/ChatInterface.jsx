@@ -435,7 +435,7 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
           ));
         },
         // onComplete callback
-        (fullAnswer, newConversationId, messageId) => {
+        (fullAnswer, newConversationId, messageId, llmTitle) => {
           setIsTyping(false);
           
           // Update AI message with correct ID from backend (for feedback matching)
@@ -453,9 +453,11 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
           // If this is a new conversation, notify parent
           if (!currentConversationId && newConversationId) {
             setCurrentConversationId(newConversationId);
+            // Ưu tiên dùng llmTitle nếu có, nếu không thì cắt query
+            const finalTitle = llmTitle || (userQuery.slice(0, 50) + (userQuery.length > 50 ? '...' : ''));
             onConversationCreated && onConversationCreated(
               newConversationId, 
-              userQuery.slice(0, 50) + (userQuery.length > 50 ? '...' : '')
+              finalTitle
             );
           }
         },

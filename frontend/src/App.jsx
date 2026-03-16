@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
 import AuthPage from './components/AuthPage';
+import { cn } from './lib/utils';
 import { 
   getUserId, 
   getConversations, 
@@ -55,9 +56,40 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   
+  // Sidebar Width State
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isResizing, setIsResizing] = useState(false);
+
   // Responsive Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [chatKey, setChatKey] = useState(Date.now()); // Key to force re-render ChatInterface
+
+  // Handle Resize Logic
+  const startResizing = useCallback((e) => {
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resize = useCallback((e) => {
+    if (isResizing) {
+      const newWidth = e.clientX;
+      if (newWidth >= 200 && newWidth <= 450) {
+        setSidebarWidth(newWidth);
+      }
+    }
+  }, [isResizing]);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', resize);
+    window.addEventListener('mouseup', stopResizing);
+    return () => {
+      window.removeEventListener('mousemove', resize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [resize, stopResizing]);
 
   // Check authentication on mount
   useEffect(() => {
@@ -129,7 +161,9 @@ function App() {
       }
     };
     
+    window.addEventListener('resize', handleResize);
     handleResize();
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const isAdmin = true; 
@@ -236,7 +270,10 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-white text-slate-900 font-sans">
+    <div className={cn(
+      "flex h-screen w-full overflow-hidden bg-white text-slate-900 font-sans",
+      isResizing ? "cursor-col-resize select-none" : ""
+    )}>
       {/* Sidebar */}
       {currentView === 'chat' && (
         <Sidebar 
@@ -252,6 +289,8 @@ function App() {
           onClose={() => setIsSidebarOpen(false)}
           user={user}
           onLogout={handleLogout}
+          width={sidebarWidth}
+          onStartResize={startResizing}
         />
       )}
 
