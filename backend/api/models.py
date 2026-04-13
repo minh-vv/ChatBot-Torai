@@ -166,6 +166,8 @@ class MessageFeedback(models.Model):
     message_id = models.CharField(max_length=100, db_index=True)  # Dify message ID
     rating = models.CharField(max_length=10, choices=FEEDBACK_CHOICES)
     comment = models.TextField(blank=True, null=True)  # Optional user comment
+    query = models.TextField(blank=True, default='')   # User's question at time of feedback
+    answer = models.TextField(blank=True, default='')  # AI's answer at time of feedback
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -66,6 +66,30 @@ const ImageGallery = ({ files }) => {
   );
 };
 
+export const FEEDBACK_OPTIONS_KEY = 'toray_feedback_options';
+
+export const DEFAULT_FEEDBACK_OPTIONS = {
+  like: [
+    { category: 'User Experience (UX) & Speed', tags: ['Fast', 'Intuitive', 'Simple'] },
+    { category: 'Content & Information',        tags: ['Accurate', 'Helpful', 'Detailed'] },
+    { category: 'Design & Visuals',             tags: ['Clean', 'Modern', 'Easy to read'] },
+  ],
+  dislike: [
+    { category: 'User Experience (UX) & Speed', tags: ['Slow', 'Confusing', 'Too many steps'] },
+    { category: 'Content & Information',        tags: ['Vague', 'Outdated', 'Irrelevant'] },
+    { category: 'Design & Visuals',             tags: ['Cluttered', 'Small font', 'Ugly'] },
+  ],
+};
+
+const getFeedbackOptions = () => {
+  try {
+    const stored = localStorage.getItem(FEEDBACK_OPTIONS_KEY);
+    return stored ? JSON.parse(stored) : DEFAULT_FEEDBACK_OPTIONS;
+  } catch {
+    return DEFAULT_FEEDBACK_OPTIONS;
+  }
+};
+
 const ChatInterface = ({ project, conversationId, userId, onConversationCreated, onToggleSidebar, isSidebarOpen }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -81,13 +105,18 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState(conversationId);
   const [isDragging, setIsDragging] = useState(false); // Drag and drop state
+  const [feedbackModal, setFeedbackModal] = useState({
+    open: false, messageId: null, type: null, selectedTags: [], comment: ''
+  });
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const currentAiMsgIdRef = useRef(null); // Track current AI message ID for streaming
+  const loadRequestIdRef = useRef(0);
 
   // Load chat history when conversation changes
   useEffect(() => {
     const loadHistory = async () => {
+      const requestId = ++loadRequestIdRef.current;
       // Clear previous state first
       setMessageFeedback({});
       setMessages([]);
@@ -95,11 +124,15 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
       if (conversationId) {
         setIsLoadingHistory(true);
         try {
-          // Load history and feedbacks in parallel
-          const [history, feedbacks] = await Promise.all([
+          // Load in parallel but do not block history on feedback failure
+          const [historyResult, feedbackResult] = await Promise.allSettled([
             getChatHistory(conversationId),
             getFeedbacks(conversationId)
           ]);
+          if (requestId !== loadRequestIdRef.current) return;
+
+          const history = historyResult.status === 'fulfilled' ? historyResult.value : { data: [] };
+          const feedbacks = feedbackResult.status === 'fulfilled' ? feedbackResult.value : {};
           
           if (history && history.data && history.data.length > 0) {
             // Convert Dify history format to our message format
@@ -136,6 +169,7 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
                 ];
               });
             
+            if (requestId !== loadRequestIdRef.current) return;
             setMessages(formattedMessages);
             
             // Load feedbacks - map by message_id
@@ -144,23 +178,31 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
               for (const [msgId, fb] of Object.entries(feedbacks)) {
                 feedbackMap[msgId] = fb.rating;
               }
+              if (requestId !== loadRequestIdRef.current) return;
               setMessageFeedback(feedbackMap);
             }
           } else {
             // No history - show welcome message
+            if (requestId !== loadRequestIdRef.current) return;
             setMessages([getWelcomeMessage()]);
           }
         } catch (error) {
           console.error('Error loading chat history:', error);
+          if (requestId !== loadRequestIdRef.current) return;
           setMessages([getWelcomeMessage()]);
         } finally {
-          setIsLoadingHistory(false);
+          if (requestId === loadRequestIdRef.current) {
+            setIsLoadingHistory(false);
+          }
         }
       } else {
         // New conversation - show welcome message
+        if (requestId !== loadRequestIdRef.current) return;
         setMessages([getWelcomeMessage()]);
       }
-      setCurrentConversationId(conversationId);
+      if (requestId === loadRequestIdRef.current) {
+        setCurrentConversationId(conversationId);
+      }
     };
 
     loadHistory();
@@ -259,37 +301,64 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMoreMenuOpen]);
 
-  const handleFeedback = async (messageId, feedbackType) => {
+  const handleFeedback = (messageId, feedbackType) => {
     const currentFeedback = messageFeedback[messageId];
-    const newRating = currentFeedback === feedbackType ? null : feedbackType;
-    
-    // Optimistic UI update
-    setMessageFeedback(prev => {
-      if (newRating === null) {
-        const newFeedback = { ...prev };
-        delete newFeedback[messageId];
-        return newFeedback;
-      } else {
-        return { ...prev, [messageId]: newRating };
-      }
-    });
-    
-    // Call API to persist feedback
-    try {
-      await submitFeedback(messageId, newRating, currentConversationId || '');
-    } catch (error) {
-      console.error('Failed to submit feedback:', error);
-      // Revert on error
+    if (currentFeedback === feedbackType) {
+      // Toggle off — remove feedback without modal
       setMessageFeedback(prev => {
-        if (currentFeedback) {
-          return { ...prev, [messageId]: currentFeedback };
-        } else {
-          const newFeedback = { ...prev };
-          delete newFeedback[messageId];
-          return newFeedback;
-        }
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+      submitFeedback(messageId, null, currentConversationId || '').catch(console.error);
+    } else {
+      // Find the AI message content and the preceding user query
+      const msgIndex = messages.findIndex(m => m.id === messageId);
+      const aiAnswer = msgIndex >= 0 ? (messages[msgIndex].content || '') : '';
+      const userQuery = msgIndex > 0 ? (messages[msgIndex - 1].content || '') : '';
+      setFeedbackModal({
+        open: true, messageId, type: feedbackType,
+        selectedTags: [], comment: '',
+        query: userQuery, answer: aiAnswer,
       });
     }
+  };
+
+  const handleToggleTag = (tag) => {
+    setFeedbackModal(prev => {
+      const already = prev.selectedTags.includes(tag);
+      return {
+        ...prev,
+        selectedTags: already
+          ? prev.selectedTags.filter(t => t !== tag)
+          : [...prev.selectedTags, tag],
+      };
+    });
+  };
+
+  const handleSubmitFeedback = async () => {
+    const { messageId, type, selectedTags, comment, query, answer } = feedbackModal;
+    const tagPart = selectedTags.join(', ');
+    const fullComment = [tagPart, comment.trim()].filter(Boolean).join(' | ');
+
+    // Optimistic UI
+    setMessageFeedback(prev => ({ ...prev, [messageId]: type }));
+    setFeedbackModal({ open: false, messageId: null, type: null, selectedTags: [], comment: '', query: '', answer: '' });
+
+    try {
+      await submitFeedback(messageId, type, currentConversationId || '', fullComment, query || '', answer || '');
+    } catch (error) {
+      console.error('Failed to submit feedback:', error);
+      setMessageFeedback(prev => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+    }
+  };
+
+  const handleCloseFeedbackModal = () => {
+    setFeedbackModal({ open: false, messageId: null, type: null, selectedTags: [], comment: '', query: '', answer: '' });
   };
 
   const handleCopyMessage = async (messageId) => {
@@ -1097,6 +1166,102 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Feedback Modal */}
+      {feedbackModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className={cn(
+              "px-6 py-4 flex items-center justify-between border-b",
+              feedbackModal.type === 'like' ? "border-green-100 bg-green-50" : "border-red-100 bg-red-50"
+            )}>
+              <div className="flex items-center gap-2.5">
+                {feedbackModal.type === 'like'
+                  ? <ThumbsUp className="w-5 h-5 text-green-600" />
+                  : <ThumbsDown className="w-5 h-5 text-red-500" />
+                }
+                <div>
+                  <p className={cn("font-semibold text-sm", feedbackModal.type === 'like' ? "text-green-800" : "text-red-700")}>
+                    {feedbackModal.type === 'like' ? 'What did you like?' : 'What went wrong?'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">Select all that apply</p>
+                </div>
+              </div>
+              <button
+                onClick={handleCloseFeedbackModal}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white/70 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-5 space-y-5">
+              {getFeedbackOptions()[feedbackModal.type].map(({ category, tags }) => (
+                <div key={category}>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">{category}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tags.map(tag => {
+                      const selected = feedbackModal.selectedTags.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => handleToggleTag(tag)}
+                          className={cn(
+                            "px-3.5 py-1.5 rounded-full text-sm font-medium border transition-all duration-150",
+                            selected
+                              ? feedbackModal.type === 'like'
+                                ? "bg-green-100 border-green-300 text-green-800 shadow-sm"
+                                : "bg-red-100 border-red-300 text-red-800 shadow-sm"
+                              : "bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-white"
+                          )}
+                        >
+                          {selected && <span className="mr-1">✓</span>}
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {/* Optional comment */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">Additional comment (optional)</p>
+                <textarea
+                  value={feedbackModal.comment}
+                  onChange={e => setFeedbackModal(prev => ({ ...prev, comment: e.target.value }))}
+                  placeholder="Tell us more..."
+                  rows={2}
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C]/40 resize-none bg-slate-50 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 pb-5 flex items-center justify-end gap-3">
+              <button
+                onClick={handleCloseFeedbackModal}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitFeedback}
+                className={cn(
+                  "px-5 py-2 text-sm font-semibold rounded-lg text-white transition-all shadow-sm hover:shadow-md active:scale-[0.98]",
+                  feedbackModal.type === 'like'
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-red-500 hover:bg-red-600"
+                )}
+              >
+                Submit Feedback
+              </button>
+            </div>
           </div>
         </div>
       )}

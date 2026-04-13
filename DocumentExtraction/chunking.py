@@ -243,7 +243,11 @@ def chunk_section_openrouter(section_content: str):
 
 class ChunkModule:
     def __init__(self, output_dir=None, storage_client=None, mode="prod", max_workers: int = 4):
-        self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("LLM_API"))
+        try:
+            self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("LLM_API"))
+        except Exception as e:
+            logger.warning("Failed to initialize LLM model for chunking; continuing without model: %s", e)
+            self.model = None
         self.max_workers = max_workers
         self.output_dir = output_dir
         self.mode = mode
@@ -298,12 +302,23 @@ class ChunkModule:
             # executor.map bảo toàn thứ tự tương ứng với input sequence
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 results = list(tqdm(executor.map(func, sections), total=len(sections), desc="Chunking sections"))
-            for section_chunks in results:
-                # mỗi section_chunks là đối tượng Chunks
-                all_chunks.extend(section_chunks.chunks)
+            for i, section_chunks in enumerate(results):
+                if section_chunks.chunks:
+                    all_chunks.extend(section_chunks.chunks)
+                else:
+                    # Fallback: LLM thất bại → dùng text gốc làm 1 chunk để đảm bảo dữ liệu được index
+                    raw_section = sections[i].strip()
+                    if raw_section:
+                        logger.warning(
+                            "⚠️  LLM không tạo được chunk cho section %d/%d — dùng fallback chunk từ text gốc.",
+                            i + 1, len(sections)
+                        )
+                        heading_line = raw_section.splitlines()[0][:120].strip() or f"Section {i + 1}"
+                        all_chunks.append(Chunk(heading=heading_line, content=raw_section))
 
-        # Chuyển sang dict trước khi tóm tắt
+        # Chuyển sang dict trước khi lưu
         all_chunks_dict = [chunk.model_dump() for chunk in all_chunks]
+        logger.info("📊 Tổng chunks tạo được: %d (từ %d sections)", len(all_chunks_dict), len(sections))
         if self.mode == "dev":
             try:
                 save_path = md_path.with_suffix(".json")

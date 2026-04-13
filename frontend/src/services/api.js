@@ -1,6 +1,8 @@
 // API Service for ChatBot
-const API_BASE_URL = 'http://127.0.0.1:8000/api';
-const DIFY_API_URL = 'http://127.0.0.1:8888/dify';
+// Use relative URLs so requests go through Nginx proxy in Docker
+// In development (non-Docker), these still work if backend is on same host
+const API_BASE_URL = '/api';
+const DIFY_API_URL = '/dify';
 
 // Check backend health
 export const checkHealth = async () => {
@@ -50,6 +52,17 @@ export const isAuthenticated = () => {
 const getAuthHeaders = () => {
   const token = getAuthToken();
   return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 8000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 // Register new user
@@ -221,9 +234,29 @@ export const getConversations = async () => {
   const userId = getUserId();
   if (!userId) return [];
   try {
-    const response = await fetch(`${DIFY_API_URL}/conversations?user_id=${userId}`);
+    // Prefer local backend cache first (faster and more stable on initial load)
+    const localResp = await fetchWithTimeout(
+      `${API_BASE_URL}/conversations/?user_id=${encodeURIComponent(userId)}`,
+      { headers: getAuthHeaders() },
+      6000
+    );
+    if (localResp.ok) {
+      const localData = await localResp.json();
+      const localConversations = localData.conversations || [];
+      if (localConversations.length > 0) {
+        return localConversations.map((c) => ({
+          id: c.conversation_id,
+          name: c.title,
+          created_at: c.created_at ? Math.floor(new Date(c.created_at).getTime() / 1000) : undefined,
+          updated_at: c.updated_at ? Math.floor(new Date(c.updated_at).getTime() / 1000) : undefined,
+        }));
+      }
+    }
+
+    // Fallback to Dify endpoint
+    const response = await fetchWithTimeout(`${DIFY_API_URL}/conversations?user_id=${encodeURIComponent(userId)}`, {}, 10000);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
-    // Dify returns { data: [...], has_more: ..., limit: ... }
     return data.data || [];
   } catch (error) {
     console.error('Error fetching conversations from Dify:', error);
@@ -391,19 +424,27 @@ export const sendChatMessage = async (query, conversationId = '', files = [], on
 export const getChatHistory = async (conversationId) => {
   const userId = getUserId();
   try {
-    const response = await fetch(
-      `${DIFY_API_URL}/history?user_id=${userId}&conversation_id=${conversationId}`
+    // Prefer backend cache first
+    const localResp = await fetchWithTimeout(
+      `${API_BASE_URL}/chat/history/?user_id=${encodeURIComponent(userId)}&conversation_id=${encodeURIComponent(conversationId)}`,
+      { headers: getAuthHeaders() },
+      7000
     );
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (localResp.ok) {
+      return await localResp.json();
     }
-    
-    const data = await response.json();
-    return data;
+
+    // Fallback to Dify history endpoint
+    const response = await fetchWithTimeout(
+      `${DIFY_API_URL}/history?user_id=${encodeURIComponent(userId)}&conversation_id=${encodeURIComponent(conversationId)}`,
+      {},
+      12000
+    );
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    return await response.json();
   } catch (error) {
     console.error('Error fetching chat history:', error);
-    throw error;
+    return { data: [], has_more: false };
   }
 };
 
@@ -488,7 +529,7 @@ export const getFeedbacks = async (conversationId = '') => {
       url += `&conversation_id=${conversationId}`;
     }
     
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, { headers: getAuthHeaders() }, 6000);
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -650,8 +691,7 @@ export const getKnowledgeDocuments = async (datasetId) => {
 // Get documents from MinIO via FastAPI
 export const getMinioDocuments = async (toolName = 'default') => {
   try {
-    const fastApiUrl = DIFY_API_URL.replace('/dify', '');
-    const response = await fetch(`${fastApiUrl}/list-files?tool_name=${encodeURIComponent(toolName)}`);
+    const response = await fetch(`${DIFY_API_URL}/list-files?tool_name=${encodeURIComponent(toolName)}`);
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -676,8 +716,7 @@ export const uploadKnowledgeDocument = async (datasetId, file, onProgress, toolN
     fastApiFormData.append('tool_name', toolName);
     fastApiFormData.append('overwrite', overwrite);
     
-    const fastApiUrl = DIFY_API_URL.replace('/dify', '');
-    const fastApiResponse = await fetch(`${fastApiUrl}/upload-file`, {
+    const fastApiResponse = await fetch(`${DIFY_API_URL}/upload-file`, {
       method: 'POST',
       body: fastApiFormData
     });
@@ -748,8 +787,7 @@ export const deleteKnowledgeDocument = async (datasetId, documentId) => {
 // Delete document from MinIO/Qdrant via FastAPI
 export const deleteMinioDocument = async (fileName, toolName = 'default') => {
   try {
-    const fastApiUrl = DIFY_API_URL.replace('/dify', '');
-    const response = await fetch(`${fastApiUrl}/delete-file-object?file_name=${encodeURIComponent(fileName)}&tool_name=${encodeURIComponent(toolName)}`, {
+    const response = await fetch(`${DIFY_API_URL}/delete-file-object?file_name=${encodeURIComponent(fileName)}&tool_name=${encodeURIComponent(toolName)}`, {
       method: 'POST'
     });
     
@@ -802,6 +840,25 @@ export const updateAdminUser = async (userId, updates) => {
     return data;
   } catch (error) {
     console.error('Error updating user:', error);
+    throw error;
+  }
+};
+
+export const createAdminUser = async (userData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/users/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(userData)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Tạo người dùng thất bại');
+    }
+    return data;
+  } catch (error) {
+    console.error('Error creating user:', error);
     throw error;
   }
 };

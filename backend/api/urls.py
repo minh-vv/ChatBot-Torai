@@ -15,14 +15,14 @@ from .views import (
     MeView,
     ChangePasswordView,
     MessageFeedbackView,
+    AdminUserListView,
+    AdminUserDetailView,
+    AdminFeedbackListView,
     KnowledgeBaseListView,
     KnowledgeBaseDetailView,
     KnowledgeDocumentListView,
     KnowledgeDocumentDetailView,
     KnowledgeStatsView,
-    AdminUserListView,
-    AdminUserDetailView,
-    AdminFeedbackListView,
 )
 
 urlpatterns = [
@@ -53,17 +53,18 @@ urlpatterns = [
     path('files/', FileListView.as_view(), name='file-list'),
     path('files/<int:file_id>/delete/', FileDeleteView.as_view(), name='file-delete'),
     
-    # Knowledge Base Management
-    path('knowledge/', KnowledgeBaseListView.as_view(), name='knowledge-list'),
-    path('knowledge/stats/', KnowledgeStatsView.as_view(), name='knowledge-stats'),
-    path('knowledge/<str:dataset_id>/', KnowledgeBaseDetailView.as_view(), name='knowledge-detail'),
-    path('knowledge/<str:dataset_id>/documents/', KnowledgeDocumentListView.as_view(), name='knowledge-documents'),
-    path('knowledge/<str:dataset_id>/documents/<str:document_id>/', KnowledgeDocumentDetailView.as_view(), name='knowledge-document-detail'),
-    
+
     # Admin User Management
     path('admin/users/', AdminUserListView.as_view(), name='admin-user-list'),
     path('admin/users/<str:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
     
     # Admin Feedback Management
     path('admin/feedbacks/', AdminFeedbackListView.as_view(), name='admin-feedback-list'),
+
+    # Knowledge Base Management
+    path('knowledge/', KnowledgeBaseListView.as_view(), name='knowledge-list'),
+    path('knowledge/stats/', KnowledgeStatsView.as_view(), name='knowledge-stats'),
+    path('knowledge/<str:dataset_id>/', KnowledgeBaseDetailView.as_view(), name='knowledge-detail'),
+    path('knowledge/<str:dataset_id>/documents/', KnowledgeDocumentListView.as_view(), name='knowledge-documents'),
+    path('knowledge/<str:dataset_id>/documents/<str:document_id>/', KnowledgeDocumentDetailView.as_view(), name='knowledge-document-detail'),
 ]

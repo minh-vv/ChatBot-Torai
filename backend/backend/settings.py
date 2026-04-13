@@ -137,3 +137,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Hỗ trợ CSRF cho ngrok và truy cập từ xa
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.ngrok-free.app',
+    'http://*.ngrok-free.app',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+

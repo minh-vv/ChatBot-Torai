@@ -131,6 +131,7 @@ def process_bytes_upload_and_process(file_bytes: bytes, filename: str, tool_name
             pass
 
 @app.post("/upload-file")
+@app.post("/dify/upload-file")
 async def create_upload_file(file: UploadFile = File(...), tool_name: str = Form("default"), overwrite: bool = Form(False), background_tasks: BackgroundTasks = None):
     """
     Receive uploaded file, upload it to MinIO immediately (no persistent save to D:),
@@ -193,6 +194,7 @@ def search(request: Request):
     }
 
 @app.post("/delete-file-object")
+@app.post("/dify/delete-file-object")
 def delete_file(file_name: str, tool_name: str):
     file_name = _folder_name_from_filename(file_name.split(".")[0])
     # xóa cache
@@ -201,16 +203,34 @@ def delete_file(file_name: str, tool_name: str):
     storage_client.delete_folder(bucket_type=os.getenv("STORAGE_BUCKET"), folder=f"{tool_name}/{file_name}")
 
 @app.get("/list-files")
+@app.get("/dify/list-files")
 def list_files(tool_name: str = "default"):
     bucket = os.getenv("STORAGE_BUCKET")
-    folder = f"{tool_name}"
-    objects = storage_client.list_objects(bucket, prefix=folder)
-    # Filter for docx and pdf
+    objects = storage_client.list_objects(bucket, prefix=tool_name)
+    # Show only original user-uploaded file types (not pipeline-generated .md files)
+    supported_exts = ('.pdf', '.docx', '.doc')
     filtered_objects = [
-        obj for obj in objects 
-        if obj["object_name"].lower().endswith(('.docx', '.pdf'))
+        obj for obj in objects
+        if obj["object_name"].lower().endswith(supported_exts)
     ]
     return filtered_objects
+
+@app.get("/list-folders")
+def list_folders():
+    """Return all top-level tool_name folders that actually exist in MinIO."""
+    bucket = os.getenv("STORAGE_BUCKET")
+    try:
+        all_objects = storage_client.list_objects(bucket, prefix="")
+        # Extract unique top-level folder names (first path component)
+        folders = set()
+        for obj in all_objects:
+            parts = obj["object_name"].split("/")
+            if len(parts) > 1 and parts[0]:
+                folders.add(parts[0])
+        return sorted(list(folders))
+    except Exception as e:
+        logger.error("Error listing folders: %s", e)
+        return []
 
 # ================ CACHE =========
 class CacheRequest(BaseModel):

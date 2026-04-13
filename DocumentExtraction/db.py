@@ -1,5 +1,6 @@
 # ...existing code...
 import uuid 
+import requests
 import json
 from qdrant_client import QdrantClient, models
 from pathlib import Path
@@ -18,7 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
  
-genai.configure(api_key=os.getenv("LLM_API"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 class QdrantVectorstore:
     def __init__(self, host, port, output_dir=None, storage_client=None, mode="prod"):
@@ -33,11 +34,19 @@ class QdrantVectorstore:
             self.storage_folder = os.getenv("STORAGE_FOLDER", "").strip("/")
 
     def embed_text(self, text):
-        return genai.embed_content(
-            model=self.text_embed_model,
-            content=text,
-            task_type="retrieval_document",
-        )['embedding']
+            response = requests.post(
+            url="https://openrouter.ai/api/v1/embeddings",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps({
+                "model": "google/gemini-embedding-001",
+                "input": text,
+                "encoding_format": "float"
+            })
+            )
+            return response.json()["data"][0]["embedding"]
     
     def create_collection(self, collection_name):
         """Tạo collection mới trên Qdrant (nếu chưa có)."""
@@ -117,9 +126,12 @@ class QdrantVectorstore:
                     continue
 
                 logger.debug("Loaded raw data of type: %s", type(raw_data))
-                chunks = raw_data.get("chunks") if isinstance(raw_data, dict) else None
+                if not isinstance(raw_data, dict) or "chunks" not in raw_data:
+                    logger.warning("⚠️ Không tìm thấy key 'chunks' trong %s, bỏ qua.", data_path)
+                    continue
+                chunks = raw_data["chunks"]
                 if not chunks:
-                    logger.warning("⚠️ Không tìm thấy 'chunks' trong %s, bỏ qua.", data_path)
+                    logger.warning("⚠️ Danh sách 'chunks' rỗng trong %s — LLM có thể đã thất bại khi xử lý, bỏ qua.", data_path)
                     continue
 
                 points = []
@@ -169,9 +181,12 @@ class QdrantVectorstore:
                     continue
 
                 filename = os.path.splitext(os.path.basename(obj['object_name']))[0].replace("_posted", "").strip()
-                chunks = raw_data.get("chunks") if isinstance(raw_data, dict) else None
+                if not isinstance(raw_data, dict) or "chunks" not in raw_data:
+                    logger.warning("⚠️ Không tìm thấy key 'chunks' trong %s, bỏ qua.", obj['object_name'])
+                    continue
+                chunks = raw_data["chunks"]
                 if not chunks:
-                    logger.warning("⚠️ Không tìm thấy 'chunks' trong %s, bỏ qua.", obj['object_name'])
+                    logger.warning("⚠️ Danh sách 'chunks' rỗng trong %s — LLM có thể đã thất bại khi xử lý, bỏ qua.", obj['object_name'])
                     continue
 
                 points = []

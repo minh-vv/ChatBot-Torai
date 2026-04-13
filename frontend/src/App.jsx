@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
@@ -18,6 +19,15 @@ import {
   logout,
   getCurrentUser
 } from './services/api';
+
+// Route constants
+const ROUTES = {
+  CHAT:     '/',
+  ADMIN:    '/admin',
+  USERS:    '/users',
+  FEEDBACK: '/feedback',
+  PROFILE:  '/profile',
+};
 
 // Helper function to categorize conversations by date
 const categorizeByDate = (conversations) => {
@@ -53,7 +63,19 @@ const categorizeByDate = (conversations) => {
 
 function App() {
   const { t } = useLanguage();
-  const [currentView, setCurrentView] = useState('chat');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Derive current view from URL path
+  const currentView = (() => {
+    const p = location.pathname;
+    if (p.startsWith('/admin'))    return 'admin';
+    if (p.startsWith('/users'))    return 'users';
+    if (p.startsWith('/feedback')) return 'feedback';
+    if (p.startsWith('/profile'))  return 'profile';
+    return 'chat';
+  })();
+
   const [chatHistory, setChatHistory] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -122,6 +144,9 @@ function App() {
             const conversations = await getConversations();
             const categorized = categorizeByDate(conversations);
             setChatHistory(categorized);
+            if (!activeConversationId && categorized.length > 0) {
+              setActiveConversationId(categorized[0].conversation_id);
+            }
           } catch (error) {
             console.error('Error loading conversations:', error);
           }
@@ -157,6 +182,7 @@ function App() {
     setIsLoggedIn(false);
     setChatHistory([]);
     setActiveConversationId(null);
+    navigate(ROUTES.CHAT, { replace: true });
   };
 
   // Handle window resize
@@ -182,16 +208,19 @@ function App() {
       const conversations = await getConversations();
       const categorized = categorizeByDate(conversations);
       setChatHistory(categorized);
+      if (!activeConversationId && categorized.length > 0) {
+        setActiveConversationId(categorized[0].conversation_id);
+      }
     } catch (error) {
       console.error('Error refreshing conversations:', error);
     }
-  }, []);
+  }, [activeConversationId]);
 
   // Handle new chat - reset to empty conversation
   const handleNewChat = () => {
     setActiveConversationId(null);
     setChatKey(Date.now()); // Force ChatInterface to re-render
-    setCurrentView('chat');
+    navigate(ROUTES.CHAT);
     
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
@@ -292,10 +321,10 @@ function App() {
           onDeleteConversation={handleDeleteConversation}
           onRenameConversation={handleRenameConversation}
           isAdmin={isAdmin}
-          onOpenAdmin={() => setCurrentView('admin')}
-          onOpenUsers={() => setCurrentView('users')}
-          onOpenFeedback={() => setCurrentView('feedback')}
-          onOpenProfile={() => setCurrentView('profile')}
+          onOpenAdmin={() => navigate(ROUTES.ADMIN)}
+          onOpenUsers={() => navigate(ROUTES.USERS)}
+          onOpenFeedback={() => navigate(ROUTES.FEEDBACK)}
+          onOpenProfile={() => navigate(ROUTES.PROFILE)}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           user={user}
@@ -309,20 +338,26 @@ function App() {
       <main className="flex-1 relative h-full overflow-hidden flex flex-col w-full">
         {currentView === 'admin' && isAdmin ? (
           <AdminDashboard 
-            onBack={() => setCurrentView('chat')}
+            onBack={() => navigate(ROUTES.CHAT)}
           />
+        ) : currentView === 'admin' && !isAdmin ? (
+          <Navigate to={ROUTES.CHAT} replace />
         ) : currentView === 'users' && isAdmin ? (
           <UserManagement 
-            onBack={() => setCurrentView('chat')}
+            onBack={() => navigate(ROUTES.CHAT)}
           />
+        ) : currentView === 'users' && !isAdmin ? (
+          <Navigate to={ROUTES.CHAT} replace />
         ) : currentView === 'feedback' && isAdmin ? (
           <FeedbackManagement 
-            onBack={() => setCurrentView('chat')}
+            onBack={() => navigate(ROUTES.CHAT)}
           />
+        ) : currentView === 'feedback' && !isAdmin ? (
+          <Navigate to={ROUTES.CHAT} replace />
         ) : currentView === 'profile' ? (
           <ProfilePage
             user={user}
-            onBack={() => setCurrentView('chat')}
+            onBack={() => navigate(ROUTES.CHAT)}
             onUserUpdate={(updatedUser) => setUser(updatedUser)}
           />
         ) : (

@@ -4,6 +4,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status
 from django.http import StreamingHttpResponse
 from django.db import models as db_models
+from datetime import datetime, timezone, timedelta
 import json
 import uuid
 import re
@@ -16,11 +17,6 @@ from .dify import (
     delete_conversation as dify_delete_conversation,
     rename_conversation as dify_rename_conversation,
     submit_message_feedback as dify_submit_feedback,
-    process_document_content,
-    sync_document_to_dify,
-    delete_document_from_dify,
-    create_dataset_in_dify,
-    delete_dataset_from_dify,
 )
 
 
@@ -440,7 +436,7 @@ class ChatHistoryView(APIView):
                 'mime_type': mf.uploaded_file.mime_type
             })
         
-        # If we have local messages, use them (for mock mode persistence)
+        # If we have local messages, use them
         if local_messages.exists():
             result = {
                 "data": [
@@ -540,6 +536,8 @@ class MessageFeedbackView(APIView):
         conversation_id = request.data.get('conversation_id', '')
         rating = request.data.get('rating')  # 'like', 'dislike', or null to remove
         comment = request.data.get('comment', '')
+        query = request.data.get('query', '')
+        answer = request.data.get('answer', '')
         
         if not user_id:
             return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -571,7 +569,9 @@ class MessageFeedbackView(APIView):
             defaults={
                 'conversation_id': conversation_id,
                 'rating': rating,
-                'comment': comment
+                'comment': comment,
+                'query': query,
+                'answer': answer,
             }
         )
         
@@ -678,9 +678,36 @@ class FileDeleteView(APIView):
             return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
-# =====================================================
-# Knowledge Base Management Views
-# =====================================================
+
+
+def process_document_content(file_path: str, file_type: str) -> dict:
+    """Extract word count and basic stats from a document file."""
+    word_count = 0
+    try:
+        if file_type in ('txt', 'md', 'html', 'htm', 'csv'):
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            word_count = len(content.split())
+        elif file_type == 'pdf':
+            try:
+                import pdfplumber
+                with pdfplumber.open(file_path) as pdf:
+                    text = ' '.join(page.extract_text() or '' for page in pdf.pages)
+                word_count = len(text.split())
+            except ImportError:
+                pass
+        elif file_type in ('docx',):
+            try:
+                import docx
+                doc = docx.Document(file_path)
+                text = ' '.join(para.text for para in doc.paragraphs)
+                word_count = len(text.split())
+            except ImportError:
+                pass
+    except Exception:
+        pass
+    return {'word_count': word_count}
+
 
 class KnowledgeBaseListView(APIView):
     """List and create knowledge bases (admin only)"""
@@ -722,14 +749,9 @@ class KnowledgeBaseListView(APIView):
         if not name:
             return Response({'error': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Generate unique dataset_id
+        # Local id (also used in URLs as dataset_id); document storage is MinIO via FastAPI, not Dify datasets
         dataset_id = f"kb-{uuid.uuid4().hex[:12]}"
-        
-        # Try to create in Dify (if configured)
-        dify_result = create_dataset_in_dify(name, description)
-        if dify_result:
-            dataset_id = dify_result.get('id', dataset_id)
-        
+
         # Create local knowledge base
         kb = KnowledgeBase.objects.create(
             dataset_id=dataset_id,
@@ -809,10 +831,7 @@ class KnowledgeBaseDetailView(APIView):
         
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
-            
-            # Delete from Dify if synced
-            delete_dataset_from_dify(dataset_id)
-            
+
             # Delete all documents
             for doc in kb.documents.all():
                 if doc.file:
@@ -928,20 +947,14 @@ class KnowledgeDocumentListView(APIView):
                 uploaded_by=user
             )
         
-        # Process document content (word count, etc.)
+        # Process document (word count); MinIO/Qdrant ingestion is handled by FastAPI from the frontend
         try:
             result = process_document_content(doc.file.path, file_type)
             doc.word_count = result.get('word_count', 0)
             doc.status = 'ready'
+            doc.error_message = ''
             doc.save()
-            
-            # Try to sync to Dify
-            dify_result = sync_document_to_dify(dataset_id, doc.file.path, original_name)
-            if dify_result:
-                doc.dify_document_id = dify_result.get('document', {}).get('id')
-                doc.save()
-            
-            # Update knowledge base counts
+
             kb.update_counts()
             
         except Exception as e:
@@ -1001,11 +1014,7 @@ class KnowledgeDocumentDetailView(APIView):
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
             doc = kb.documents.get(document_id=document_id)
-            
-            # Delete from Dify if synced
-            if doc.dify_document_id:
-                delete_document_from_dify(dataset_id, doc.dify_document_id)
-            
+
             # Delete file and record
             if doc.file:
                 doc.file.delete(save=False)
@@ -1074,7 +1083,54 @@ def format_file_size(size_bytes):
 
 class AdminUserListView(APIView):
     """List all users and create new user (admin only)"""
-    
+
+    def post(self, request):
+        """Create a new user (admin only)"""
+        admin, error = require_admin(request)
+        if error:
+            return error
+
+        email = request.data.get('email', '').strip().lower()
+        password = request.data.get('password', '')
+        name = request.data.get('name', '').strip()
+        role = request.data.get('role', 'user')
+
+        if not email:
+            return Response({'error': 'Email là bắt buộc'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
+            return Response({'error': 'Email không hợp lệ'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not password or len(password) < 6:
+            return Response({'error': 'Mật khẩu phải có ít nhất 6 ký tự'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if User.objects.filter(email=email).exists():
+            return Response({'error': 'Email đã được sử dụng'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if role not in ('user', 'admin'):
+            role = 'user'
+
+        user_id = f"user-{uuid.uuid4().hex[:12]}"
+        user = User.objects.create(
+            user_id=user_id,
+            email=email,
+            name=name or email.split('@')[0],
+            role=role,
+        )
+        user.set_password(password)
+        user.save()
+
+        return Response({
+            'id': user.id,
+            'user_id': user.user_id,
+            'email': user.email,
+            'name': user.name,
+            'role': user.role,
+            'is_active': user.is_active,
+            'created_at': user.created_at.isoformat(),
+            'conversation_count': 0,
+        }, status=status.HTTP_201_CREATED)
+
     def get(self, request):
         admin, error = require_admin(request)
         if error:
@@ -1185,6 +1241,10 @@ class AdminFeedbackListView(APIView):
         rating_filter = request.query_params.get('rating', '')
         search = request.query_params.get('search', '').strip()
         user_filter = request.query_params.get('user_id', '').strip()
+        date_mode = request.query_params.get('date_mode', '')
+        until_date = request.query_params.get('until_date', '').strip()
+        from_date = request.query_params.get('from_date', '').strip()
+        to_date = request.query_params.get('to_date', '').strip()
 
         queryset = MessageFeedback.objects.select_related('user').all()
 
@@ -1199,19 +1259,52 @@ class AdminFeedbackListView(APIView):
                 db_models.Q(comment__icontains=search)
             )
 
+        if date_mode == 'until' and until_date:
+            try:
+                dt_until = datetime.strptime(until_date, '%Y-%m-%d').replace(
+                    hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+                )
+                queryset = queryset.filter(created_at__lte=dt_until)
+            except ValueError:
+                pass
+        elif date_mode == 'range':
+            if from_date:
+                try:
+                    dt_from = datetime.strptime(from_date, '%Y-%m-%d').replace(
+                        hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc
+                    )
+                    queryset = queryset.filter(created_at__gte=dt_from)
+                except ValueError:
+                    pass
+            if to_date:
+                try:
+                    dt_to = datetime.strptime(to_date, '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+                    )
+                    queryset = queryset.filter(created_at__lte=dt_to)
+                except ValueError:
+                    pass
+
         feedbacks = queryset.order_by('-created_at')[:500]
 
+        # Build ChatMessage fallback map (strip '-ai' suffix frontend appends)
         message_ids = [fb.message_id for fb in feedbacks]
-        messages_map = {}
-        for msg in ChatMessage.objects.filter(message_id__in=message_ids):
-            messages_map[msg.message_id] = {
-                'query': msg.query[:300],
-                'answer': msg.answer[:300],
-            }
+        clean_ids = [mid[:-3] if mid.endswith('-ai') else mid for mid in message_ids]
+        chat_msg_map = {}
+        for msg in ChatMessage.objects.filter(message_id__in=clean_ids):
+            chat_msg_map[msg.message_id] = {'query': msg.query, 'answer': msg.answer}
 
         data = []
         for fb in feedbacks:
-            msg_data = messages_map.get(fb.message_id, {})
+            # Prefer query/answer saved directly on feedback; fall back to ChatMessage
+            query = fb.query or ''
+            answer = fb.answer or ''
+            if not query or not answer:
+                clean_mid = fb.message_id[:-3] if fb.message_id.endswith('-ai') else fb.message_id
+                fallback = chat_msg_map.get(clean_mid, {})
+                query = query or fallback.get('query', '')
+                answer = answer or fallback.get('answer', '')
+
             data.append({
                 'id': fb.id,
                 'user_id': fb.user.user_id,
@@ -1221,13 +1314,13 @@ class AdminFeedbackListView(APIView):
                 'message_id': fb.message_id,
                 'rating': fb.rating,
                 'comment': fb.comment or '',
-                'query': msg_data.get('query', ''),
-                'answer': msg_data.get('answer', ''),
+                'query': query,
+                'answer': answer,
                 'created_at': fb.created_at.isoformat(),
             })
 
-        like_count = MessageFeedback.objects.filter(rating='like').count()
-        dislike_count = MessageFeedback.objects.filter(rating='dislike').count()
+        like_count = queryset.filter(rating='like').count()
+        dislike_count = queryset.filter(rating='dislike').count()
         total = like_count + dislike_count
 
         users_with_feedback = MessageFeedback.objects.values('user__user_id', 'user__name', 'user__email').distinct()

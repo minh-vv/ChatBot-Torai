@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   ArrowLeft, Users, Search, Shield, ShieldCheck, UserX, UserCheck, 
-  Trash2, Loader2, RefreshCw, ChevronDown, MessageSquare
+  Trash2, Loader2, RefreshCw, ChevronDown, MessageSquare, UserPlus, X, Eye, EyeOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { getAdminUsers, updateAdminUser, deleteAdminUser } from '../services/api';
+import { getAdminUsers, updateAdminUser, deleteAdminUser, createAdminUser } from '../services/api';
 import { useLanguage } from '../contexts/LanguageContext';
+
+const dedupeByUserId = (arr) => {
+  const seen = new Set();
+  return (arr || []).filter((u) => {
+    const id = u?.user_id;
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+};
 
 const UserManagement = ({ onBack }) => {
   const { t, lang } = useLanguage();
@@ -16,12 +27,18 @@ const UserManagement = ({ onBack }) => {
   const [roleFilter, setRoleFilter] = useState('');
   const [actionLoading, setActionLoading] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'user' });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await getAdminUsers(search, roleFilter);
-      setUsers(data.data || []);
+      const uniqueUsers = dedupeByUserId(data.data || []);
+      setUsers(uniqueUsers);
       setTotal(data.total || 0);
     } catch {
       setUsers([]);
@@ -77,6 +94,23 @@ const UserManagement = ({ onBack }) => {
     }
   };
 
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setCreateError('');
+    setCreateLoading(true);
+    try {
+      const newUser = await createAdminUser(createForm);
+      setUsers(prev => dedupeByUserId([newUser, ...prev]));
+      setTotal(prev => prev + 1);
+      setShowCreateModal(false);
+      setCreateForm({ name: '', email: '', password: '', role: 'user' });
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
   const formatDate = (iso) => {
     const d = new Date(iso);
     const localeMap = { vi: 'vi-VN', en: 'en-US', ja: 'ja-JP', zh: 'zh-CN' };
@@ -103,13 +137,22 @@ const UserManagement = ({ onBack }) => {
               <h1 className="text-xl font-bold text-slate-800">{t('userMgmtTitle')}</h1>
             </div>
           </div>
-          <button
-            onClick={loadUsers}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-            title={t('refresh')}
-          >
-            <RefreshCw className={cn("w-5 h-5 text-slate-500", isLoading && "animate-spin")} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setShowCreateModal(true); setCreateError(''); setCreateForm({ name: '', email: '', password: '', role: 'user' }); }}
+              className="flex items-center gap-2 px-4 py-2 bg-[#0E3B8C] text-white text-sm font-medium rounded-lg hover:bg-[#0c3278] transition-colors"
+            >
+              <UserPlus className="w-4 h-4" />
+              {t('createUser')}
+            </button>
+            <button
+              onClick={loadUsers}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              title={t('refresh')}
+            >
+              <RefreshCw className={cn("w-5 h-5 text-slate-500", isLoading && "animate-spin")} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -339,6 +382,132 @@ const UserManagement = ({ onBack }) => {
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-40" onClick={() => setShowDeleteConfirm(null)} />
+      )}
+
+      {/* Create User Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCreateModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-[#0E3B8C]" />
+                <h2 className="text-lg font-bold text-slate-800">{t('createUserTitle')}</h2>
+              </div>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleCreateUser} className="px-6 py-5 space-y-4">
+              {createError && (
+                <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                  {createError}
+                </div>
+              )}
+
+              {/* Name */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  {t('fullName')}
+                </label>
+                <input
+                  type="text"
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder={t('fullNamePlaceholder')}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C]"
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  {t('email')} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="example@company.com"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C]"
+                />
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  {t('initialPassword')} <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={createForm.password}
+                    onChange={(e) => setCreateForm(f => ({ ...f, password: e.target.value }))}
+                    placeholder="••••••"
+                    minLength={6}
+                    className="w-full px-4 py-2.5 pr-10 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-400">{t('errPasswordMin')}</p>
+              </div>
+
+              {/* Role */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  {t('role')}
+                </label>
+                <div className="relative">
+                  <select
+                    value={createForm.role}
+                    onChange={(e) => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                    className="appearance-none w-full px-4 py-2.5 pr-9 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0E3B8C]/20 focus:border-[#0E3B8C] cursor-pointer"
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">{t('admin')}</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={createLoading}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium bg-[#0E3B8C] text-white rounded-lg hover:bg-[#0c3278] transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {createLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />{t('creating')}</>
+                  ) : (
+                    <><UserPlus className="w-4 h-4" />{t('createUser')}</>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

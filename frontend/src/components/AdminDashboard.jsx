@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   CloudUpload, FileText, Trash2, CheckCircle2, AlertCircle, Loader2, 
-  ArrowLeft, Database, HardDrive, Plus, FolderOpen, X, Edit2, 
-  RefreshCw, File, FileSpreadsheet, FileImage
+  ArrowLeft, Database, Plus, FolderOpen, X, Edit2, 
+  RefreshCw, File, FileSpreadsheet, FileImage, Cloud
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -41,18 +41,21 @@ const AdminDashboard = ({ onBack }) => {
   const [isDragging, setIsDragging] = useState(false);
   
   const fileInputRef = useRef(null);
+  const selectedKBRef = useRef(null);
+  useEffect(() => {
+    selectedKBRef.current = selectedKB;
+  }, [selectedKB]);
+
+  /** Chỉ hiển thị PDF / Word trong bảng (khớp list-files MinIO) */
+  const isKbPdfOrWord = (filename) => {
+    if (!filename) return false;
+    const lower = filename.split('/').pop().toLowerCase();
+    return lower.endsWith('.pdf') || lower.endsWith('.docx') || lower.endsWith('.doc');
+  };
 
   useEffect(() => {
     loadData();
   }, []);
-
-  useEffect(() => {
-    if (selectedKB) {
-      loadDocuments(selectedKB.dataset_id, selectedKB.name);
-    } else {
-      setDocuments([]);
-    }
-  }, [selectedKB]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -63,9 +66,18 @@ const AdminDashboard = ({ onBack }) => {
       ]);
       setKnowledgeBases(kbs);
       setStats(statsData);
-      
-      if (kbs.length > 0 && !selectedKB) {
-        setSelectedKB(kbs[0]);
+
+      const prevId = selectedKBRef.current?.dataset_id;
+      const activeKb =
+        kbs.length === 0
+          ? null
+          : (prevId && kbs.find((k) => k.dataset_id === prevId)) || kbs[0];
+      setSelectedKB(activeKb);
+
+      if (activeKb) {
+        await loadDocuments(activeKb.dataset_id, activeKb.name);
+      } else {
+        setDocuments([]);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -76,80 +88,109 @@ const AdminDashboard = ({ onBack }) => {
 
   const loadDocuments = async (datasetId, kbName) => {
     try {
-      const [djangoDocs, minioDocs] = await Promise.all([
+      const [djangoDocs, minioByDataset, minioByLegacyName] = await Promise.all([
         getKnowledgeDocuments(datasetId),
-        getMinioDocuments(kbName)
+        getMinioDocuments(datasetId),
+        kbName && kbName !== datasetId ? getMinioDocuments(kbName) : Promise.resolve([]),
       ]);
-      
+
       const sanitizeFilename = (nameToSanitize) => {
         if (!nameToSanitize) return '';
-        // Same logic as Python's _folder_name_from_filename
         const filename = nameToSanitize.split('/').pop();
         const lastDotIndex = filename.lastIndexOf('.');
         const ext = lastDotIndex !== -1 ? filename.substring(lastDotIndex) : '';
         const base = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
-        
-        const noAccents = base.normalize('NFKD').replace(/[\u0300-\u036f]/g, "");
+        const noAccents = base.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
         const cleanName = noAccents.replace(/[^A-Za-z0-9\s_]/g, '');
         const sanitizedBase = cleanName.trim().split(/\s+/).join('_');
-        
         return (sanitizedBase + ext).toLowerCase();
       };
 
-      // Map unique documents (prefer Django for metadata)
-      const uniqueDocsMap = new Map();
+      const minioByObjectName = new Map();
+      const m1 = Array.isArray(minioByDataset) ? minioByDataset : [];
+      const m2 = Array.isArray(minioByLegacyName) ? minioByLegacyName : [];
+      [...m1, ...m2].forEach((m) => {
+        if (m && m.object_name && !minioByObjectName.has(m.object_name)) {
+          minioByObjectName.set(m.object_name, m);
+        }
+      });
+      const minioList = Array.from(minioByObjectName.values());
 
-      // 1. First Pass: Add Django documents. Lowercase name is key.
-      djangoDocs.forEach(d => {
-        const uploaderName = typeof d.uploaded_by === 'object' 
-          ? d.uploaded_by?.name || d.uploaded_by?.email || 'User' 
-          : d.uploaded_by || 'System';
-        
-        uniqueDocsMap.set(d.name.toLowerCase(), {
-          ...d,
-          file_size_display: d.file_size_display || formatFileSize(d.file_size),
+      const djangoByName = new Map();
+      djangoDocs.forEach((d) => {
+        djangoByName.set(d.name.toLowerCase(), d);
+      });
+
+      const rows = [];
+
+      minioList.forEach((m) => {
+        const mFilename = m.object_name.split('/').pop() || m.object_name;
+        if (!isKbPdfOrWord(mFilename)) return;
+        const d = djangoByName.get(mFilename.toLowerCase());
+        const uploaderName = d
+          ? typeof d.uploaded_by === 'object'
+            ? d.uploaded_by?.name || d.uploaded_by?.email || 'User'
+            : d.uploaded_by || 'System'
+          : 'MinIO';
+
+        rows.push({
+          id: m.object_name,
+          document_id: d?.document_id ?? m.object_name,
+          name: mFilename,
+          object_name: m.object_name,
+          minio_tool_prefix: m.object_name.split('/')[0] || datasetId,
+          file_type: (mFilename.includes('.') ? mFilename.split('.').pop() : 'other').toLowerCase(),
+          file_size: m.size,
+          file_size_display: formatFileSize(m.size),
+          status: d?.status || 'ready',
+          error_message: d?.error_message,
+          uploaded_by: d ? uploaderName : 'MinIO',
           uploader_name: uploaderName,
-          sanitizedName: sanitizeFilename(d.name),
-          isDjango: true
+          created_at: d?.created_at || m.last_modified,
+          isMinio: true,
+          isDjango: !!d,
+          sanitizedName: sanitizeFilename(mFilename),
         });
       });
 
-      minioDocs.forEach(m => {
-        const mFilename = m.object_name.split('/').pop();
-        const mKey = mFilename.toLowerCase();
-        const mSanitized = sanitizeFilename(mFilename);
-        
-        const alreadyInDjango = Array.from(uniqueDocsMap.values()).some(d => 
-          d.name.toLowerCase() === mKey || 
-          d.sanitizedName.toLowerCase() === mSanitized
-        );
-        
-        if (!alreadyInDjango && !uniqueDocsMap.has(mKey)) {
-          uniqueDocsMap.set(mKey, {
-            id: m.object_name,
-            document_id: m.object_name,
-            name: mFilename,
-            file_type: mFilename.split('.').pop().toLowerCase(),
-            file_size: m.size,
-            file_size_display: formatFileSize(m.size),
-            status: 'ready',
-            uploaded_by: 'MinIO',
-            uploader_name: 'MinIO',
-            created_at: m.last_modified,
-            isMinio: true,
-            isDjango: false,
-            sanitizedName: mSanitized
+      const seenBasenames = new Set(
+        minioList
+          .map((m) => m.object_name.split('/').pop() || '')
+          .filter((n) => isKbPdfOrWord(n))
+          .map((n) => n.toLowerCase())
+      );
+      djangoDocs.forEach((d) => {
+        if (!isKbPdfOrWord(d.name)) return;
+        if (!seenBasenames.has(d.name.toLowerCase())) {
+          const uploaderName =
+            typeof d.uploaded_by === 'object'
+              ? d.uploaded_by?.name || d.uploaded_by?.email || 'User'
+              : d.uploaded_by || 'System';
+          rows.push({
+            ...d,
+            file_size_display: d.file_size_display || formatFileSize(d.file_size),
+            uploader_name: uploaderName,
+            object_name: null,
+            minio_tool_prefix: datasetId,
+            isMinio: false,
+            isDjango: true,
+            sanitizedName: sanitizeFilename(d.name),
           });
         }
       });
 
-      // Convert back to array
-      setDocuments(Array.from(uniqueDocsMap.values()));
+      rows.sort((a, b) => {
+        const ta = new Date(a.created_at).getTime();
+        const tb = new Date(b.created_at).getTime();
+        return tb - ta;
+      });
+
+      setDocuments(rows.filter((r) => isKbPdfOrWord(r.name)));
     } catch (error) {
       console.error('Error loading documents:', error);
       try {
         const docs = await getKnowledgeDocuments(datasetId);
-        setDocuments(docs);
+        setDocuments((docs || []).filter((d) => isKbPdfOrWord(d.name)));
       } catch (err) {
         setDocuments([]);
       }
@@ -163,6 +204,7 @@ const AdminDashboard = ({ onBack }) => {
       const newKB = await createKnowledgeBase(newKBName, newKBDescription);
       setKnowledgeBases([newKB, ...knowledgeBases]);
       setSelectedKB(newKB);
+      selectedKBRef.current = newKB;
       setShowCreateModal(false);
       setNewKBName('');
       setNewKBDescription('');
@@ -237,11 +279,11 @@ const AdminDashboard = ({ onBack }) => {
       }, ...prev]);
       
       try {
-        const result = await uploadKnowledgeDocument(selectedKB.dataset_id, file, null, selectedKB.name);
+        const result = await uploadKnowledgeDocument(selectedKB.dataset_id, file, null, selectedKB.dataset_id);
         
         if (result && result.status === 'exists') {
           setDocuments(prev => prev.filter(d => d.document_id !== tempId));
-          setExistingFileInfo({ file, datasetId: selectedKB.dataset_id, kbName: selectedKB.name });
+          setExistingFileInfo({ file, datasetId: selectedKB.dataset_id });
           setShowExistModal(true);
           continue; 
         }
@@ -265,7 +307,7 @@ const AdminDashboard = ({ onBack }) => {
 
   const handleConfirmOverwrite = async (overwrite) => {
     if (!existingFileInfo) return;
-    const { file, datasetId, kbName } = existingFileInfo;
+    const { file, datasetId } = existingFileInfo;
     
     setShowExistModal(false);
     
@@ -286,7 +328,7 @@ const AdminDashboard = ({ onBack }) => {
       }, ...prev]);
       
       try {
-        const result = await uploadKnowledgeDocument(datasetId, file, null, kbName, true);
+        const result = await uploadKnowledgeDocument(datasetId, file, null, datasetId, true);
         setDocuments(prev => prev.map(doc => 
           doc.document_id === tempId ? result : doc
         ));
@@ -308,20 +350,29 @@ const AdminDashboard = ({ onBack }) => {
 
   const handleDeleteDocument = async (doc) => {
     if (!window.confirm(`${t('deleteDocConfirm')} "${doc.name}"?`)) return;
-    
+
+    const toolName = doc.minio_tool_prefix || selectedKB.dataset_id;
+
     try {
-      if (doc.isMinio) {
-        await deleteMinioDocument(doc.name, selectedKB.name);
-      } else {
+      if (doc.document_id && !String(doc.document_id).includes('/')) {
         await deleteKnowledgeDocument(selectedKB.dataset_id, doc.document_id);
+      }
+      if (doc.object_name || doc.isMinio) {
+        await deleteMinioDocument(doc.name, toolName);
+      } else {
         try {
-          await deleteMinioDocument(doc.name, selectedKB.name);
+          await deleteMinioDocument(doc.name, toolName);
         } catch (minioErr) {
-          console.warn('Failed to delete from MinIO (might not exist):', minioErr);
+          console.warn('Failed to delete from MinIO (try legacy KB name):', minioErr);
+          try {
+            await deleteMinioDocument(doc.name, selectedKB.name);
+          } catch (_) {
+            /* ignore */
+          }
         }
       }
-      
-      setDocuments(documents.filter(d => d.document_id !== doc.document_id));
+
+      setDocuments(documents.filter((d) => d.document_id !== doc.document_id && d.id !== doc.id));
       loadData();
     } catch (error) {
       alert(t('cannotDelete') + ': ' + error.message);
@@ -337,8 +388,11 @@ const AdminDashboard = ({ onBack }) => {
   };
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return '-';
+    const parsed = new Date(dateStr);
+    if (Number.isNaN(parsed.getTime())) return '-';
     const localeMap = { vi: 'vi-VN', en: 'en-US', ja: 'ja-JP', zh: 'zh-CN' };
-    return new Date(dateStr).toLocaleDateString(localeMap[lang] || 'vi-VN');
+    return parsed.toLocaleDateString(localeMap[lang] || 'vi-VN');
   };
 
   const getFileIcon = (fileType) => {
@@ -379,8 +433,8 @@ const AdminDashboard = ({ onBack }) => {
           >
             <RefreshCw className={cn("w-3 h-3", isLoading && "animate-spin")} /> {t('refresh')}
           </button>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded text-xs font-medium border border-green-100">
-            <HardDrive className="w-3 h-3" /> Local Storage
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-sky-50 text-sky-800 rounded text-xs font-medium border border-sky-100" title="MinIO object storage">
+            <Cloud className="w-3 h-3" /> {t('storageMinio')}
           </div>
         </div>
       </div>
@@ -412,7 +466,10 @@ const AdminDashboard = ({ onBack }) => {
               knowledgeBases.map(kb => (
                 <div
                   key={kb.dataset_id}
-                  onClick={() => setSelectedKB(kb)}
+                  onClick={() => {
+                    setSelectedKB(kb);
+                    loadDocuments(kb.dataset_id, kb.name);
+                  }}
                   className={cn(
                     "p-3 rounded-lg cursor-pointer mb-2 border transition-all",
                     selectedKB?.dataset_id === kb.dataset_id
@@ -477,7 +534,7 @@ const AdminDashboard = ({ onBack }) => {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".pdf,.doc,.docx,.txt,.md,.html,.csv,.xlsx,.xls"
+                  accept=".pdf,.doc,.docx"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -510,33 +567,38 @@ const AdminDashboard = ({ onBack }) => {
                     <p className="text-xs mt-1">{t('uploadToStart')}</p>
                   </div>
                 ) : (
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full table-fixed text-left text-sm">
                     <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                       <tr>
-                        <th className="px-6 py-3 w-[40%]">{t('fileName')}</th>
-                        <th className="px-6 py-3">{t('type')}</th>
-                        <th className="px-6 py-3">{t('status')}</th>
-                        <th className="px-6 py-3">{t('uploadDate')}</th>
-                        <th className="px-6 py-3 text-right">{t('operation')}</th>
+                        <th className="px-6 py-3 w-[44%]">{t('fileName')}</th>
+                        <th className="px-6 py-3 w-[12%]">{t('type')}</th>
+                        <th className="px-6 py-3 w-[16%]">{t('status')}</th>
+                        <th className="px-6 py-3 w-[20%]">{t('uploadDate')}</th>
+                        <th className="px-6 py-3 w-[8%] text-right">{t('operation')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {documents.map((doc) => (
-                        <tr key={doc.document_id} className="hover:bg-slate-50/80 transition-colors">
+                        <tr key={doc.id || doc.document_id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="p-2 bg-slate-100 rounded">
                                 {getFileIcon(doc.file_type)}
                               </div>
                               <div>
-                                <span className="font-medium text-slate-700 block">{doc.name}</span>
-                                <span className="text-xs text-slate-400">{doc.file_size_display}</span>
+                                <span className="font-medium text-slate-700 block truncate max-w-[26rem]" title={doc.name}>{doc.name}</span>
+                                <span className="text-xs text-slate-400">{doc.file_size_display || '-'}</span>
+                                {doc.object_name && (
+                                  <span className="text-[10px] text-slate-400 block font-mono truncate max-w-[26rem]" title={doc.object_name}>
+                                    {t('minioObjectPath')}: {doc.object_name}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="uppercase text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                              {doc.file_type}
+                            <span className="uppercase inline-block max-w-full truncate text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded" title={doc.file_type}>
+                              {doc.file_type || '-'}
                             </span>
                           </td>
                           <td className="px-6 py-4">

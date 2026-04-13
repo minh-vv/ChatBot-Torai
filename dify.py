@@ -283,7 +283,40 @@ def rename_conversation(user_id: str, conversation_id: str, name: str = None, au
     except Exception as e:
         logger.exception("Lỗi khi gọi rename_conversation: %s", e)
         return None
-        
+
+def submit_message_feedback(user_id: str, message_id: str, rating: str, comment: str = None):
+    """
+    Gửi đánh giá cho một message của AI.
+    :param user_id: User identifier
+    :param message_id: Message ID từ Dify
+    :param rating: 'like' hoặc 'dislike'
+    :param comment: Nhận xét bổ sung (tùy chọn)
+    :return: dict chứa kết quả hoặc None nếu lỗi
+    """
+    url = f"{DIFY_BASE_URL}/messages/{message_id}/feedbacks"
+    headers = {
+        "Authorization": f"Bearer {DIFY_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "user": user_id,
+        "rating": rating
+    }
+    try:
+        logger.debug("Submitting feedback for message=%s user=%s rating=%s", message_id, user_id, rating)
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            resp = response.json()
+            logger.info("Feedback submitted for message %s: %s", message_id, rating)
+            return resp
+        else:
+            logger.error("Lỗi gửi feedback: %s %s", response.status_code, response.text)
+            return None
+    except Exception as e:
+        logger.exception("Lỗi khi gọi submit_message_feedback: %s", e)
+        return None
+
+
 if __name__ == "__main__":
     user_id = "user-e6c202bf4c64"
     print(get_conversations(user_id))
