@@ -2,26 +2,23 @@ version: "3.9"
 
 services:
   app:
-    image: ngoquan0904/tool_use_agent:1.0
+    image: ngoquan0904/tool_use_agent:2.0
     container_name: document_extraction
     ports:
       - "8888:8888"
     environment:
       DOCUMENT_FOLDER: ${DOCUMENT_FOLDER}
       HF_TOKEN: ${HF_TOKEN}
-      LLM_API: ${LLM_API}
-      MINIO_BUCKET: ${MINIO_BUCKET}
-      STORAGE_BUCKET: ${MINIO_BUCKET}
-      MINIO_HOST: "minio"
-      MINIO_PORT: "9000"
+      STORAGE_BUCKET: ${STORAGE_BUCKET}
+      MINIO_HOST: ${MINIO_HOST}
+      MINIO_PORT: ${MINIO_PORT:-9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       COLLECTION_NAME: ${COLLECTION_NAME}
-      QDRANT_HOST: "qdrant"
-      QDRANT_PORT: "6333"
+      QDRANT_HOST: ${QDRANT_HOST}
+      QDRANT_PORT: ${QDRANT_PORT}
       STOPWORD_PATH: "/app/stopwords_path.txt"
       ELASTICACHE_ENDPOINT: ${ELASTICACHE_ENDPOINT}
-      ELASTICACHE_PORT: "6379"
       DIFY_API_KEY: ${DIFY_API_KEY}
       DIFY_BASE_URL: ${DIFY_BASE_URL}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
@@ -30,7 +27,7 @@ services:
       USE_OPENROUTER: ${USE_OPENROUTER}
     volumes:
       - .:/app
-      - ./Cache/stopwords_vi.txt:/app/stopwords_path.txt
+      - ./cache/stopwords_vi.txt:/app/stopwords_path.txt
     depends_on:
       - qdrant
       - minio
@@ -72,18 +69,31 @@ services:
     container_name: django_backend
     ports:
       - "8000:8000"
+    env_file:
+      - ./backend/.env
     environment:
       - DEBUG=True
       - SECRET_KEY=django-insecure-docker-dev-key
       - ALLOWED_HOSTS=*
       - DIFY_API_KEY=${DIFY_API_KEY}
       - DIFY_BASE_URL=${DIFY_BASE_URL}
+      - ELASTICACHE_ENDPOINT=${ELASTICACHE_ENDPOINT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - STORAGE_BUCKET=${STORAGE_BUCKET}
+      - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_PORT=${QDRANT_PORT}
+      - COLLECTION_NAME=${COLLECTION_NAME}
     volumes:
       - ./backend:/app
       # Single source of truth: project root dify.py (not backend/api/dify.py)
       - ./dify.py:/app/api/dify.py
     depends_on:
       - redis
+      - qdrant
+      - minio
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

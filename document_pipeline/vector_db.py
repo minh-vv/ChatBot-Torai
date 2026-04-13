@@ -1,53 +1,52 @@
-# ...existing code...
+import os
 import uuid 
 import requests
 import json
-from qdrant_client import QdrantClient, models
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import google.generativeai as genai
 from tqdm import tqdm
-from dotenv import load_dotenv
-load_dotenv()
-import os
+from pathlib import Path
+from qdrant_client import QdrantClient, models
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 import logging
-
-# Cấu hình logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
  
+from dotenv import load_dotenv
+load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
 class QdrantVectorstore:
-    def __init__(self, host, port, output_dir=None, storage_client=None, mode="prod"):
-        self.client = QdrantClient(host=host, port=port)
-        self.text_embed_model = 'models/gemini-embedding-001'
-        self.dimension_size = 3072
+    def __init__(self, host=None, port=None, url=None, api_key=None, output_dir=None, storage_client=None, mode="prod"):
+        if host:
+            self.client = QdrantClient(host=host, port=port)
+        else:
+            self.client = QdrantClient(url=url, api_key=api_key)
+                
         self.output_dir = output_dir
         self.mode = mode
+        self.dimension_size = 3072  # Kích thước embedding của google/gemini-embedding-001  
         if self.mode == "prod":
             self.storage_client = storage_client
             self.storage_bucket = os.getenv("STORAGE_BUCKET")
-            self.storage_folder = os.getenv("STORAGE_FOLDER", "").strip("/")
-
-    def embed_text(self, text):
-            response = requests.post(
-            url="https://openrouter.ai/api/v1/embeddings",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps({
-                "model": "google/gemini-embedding-001",
-                "input": text,
-                "encoding_format": "float"
-            })
-            )
-            return response.json()["data"][0]["embedding"]
     
+    def embed_text(self, text):
+        response = requests.post(
+        url="https://openrouter.ai/api/v1/embeddings",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps({
+            "model": "google/gemini-embedding-001",
+            "input": text,
+            "encoding_format": "float"
+        })
+        )
+        return response.json()["data"][0]["embedding"]
+
+
     def create_collection(self, collection_name):
         """Tạo collection mới trên Qdrant (nếu chưa có)."""
         try:
@@ -116,26 +115,19 @@ class QdrantVectorstore:
         if self.mode == "dev":
             folder = Path(self.output_dir) / file_name
             data_paths = list(folder.glob("*.json"))
+            print(f"Found {len(data_paths)} JSON files in {folder} for ingestion.")
             for data_path in data_paths:
                 logger.info("Processing data path: %s", data_path)
                 try:
                     with open(data_path, "r", encoding="utf-8") as f:
-                        raw_data = json.load(f)
+                        chunks = json.load(f)
                 except Exception as e:
                     logger.error("⚠️ Không thể đọc file %s: %s", data_path, e)
                     continue
-
-                logger.debug("Loaded raw data of type: %s", type(raw_data))
-                if not isinstance(raw_data, dict) or "chunks" not in raw_data:
-                    logger.warning("⚠️ Không tìm thấy key 'chunks' trong %s, bỏ qua.", data_path)
-                    continue
-                chunks = raw_data["chunks"]
-                if not chunks:
-                    logger.warning("⚠️ Danh sách 'chunks' rỗng trong %s — LLM có thể đã thất bại khi xử lý, bỏ qua.", data_path)
-                    continue
+                logger.debug("Loaded raw data of type: %s", type(chunks))
 
                 points = []
-                for text in tqdm(["\n".join(f"{k}: {v}" for k, v in item.items()) for item in chunks]):
+                for text in tqdm(chunks.values()):
                     try:
                         embedding = self.embed_text(text)
                         points.append(
@@ -157,7 +149,8 @@ class QdrantVectorstore:
                         logger.error("⚠️ Lỗi upsert vào Qdrant cho %s: %s", data_path, e)
 
         elif self.mode == "prod":
-            prefix = f"{tool_name}/{file_name}"
+            base_storage_folder = getattr(self, "storage_folder", "") or ""
+            prefix = f"{base_storage_folder}/{tool_name}/{file_name}" if base_storage_folder else f"{tool_name}/{file_name}"
             prefix = prefix.strip("/")
 
             try:
@@ -175,22 +168,15 @@ class QdrantVectorstore:
                     raw_bytes = response.read()
                     response.close()
                     # response.release_conn()
-                    raw_data = json.loads(raw_bytes.decode("utf-8"))
+                    chunks = json.loads(raw_bytes.decode("utf-8"))
                 except Exception as e:
                     logger.error("⚠️ Không thể đọc object %s: %s", obj['object_name'], e)
                     continue
 
                 filename = os.path.splitext(os.path.basename(obj['object_name']))[0].replace("_posted", "").strip()
-                if not isinstance(raw_data, dict) or "chunks" not in raw_data:
-                    logger.warning("⚠️ Không tìm thấy key 'chunks' trong %s, bỏ qua.", obj['object_name'])
-                    continue
-                chunks = raw_data["chunks"]
-                if not chunks:
-                    logger.warning("⚠️ Danh sách 'chunks' rỗng trong %s — LLM có thể đã thất bại khi xử lý, bỏ qua.", obj['object_name'])
-                    continue
 
                 points = []
-                for text in tqdm(["\n".join(f"{k}: {v}" for k, v in item.items()) for item in chunks]):
+                for text in tqdm(chunks.values()):
                     try:
                         embedding = self.embed_text(text)
                         points.append(
@@ -216,8 +202,7 @@ class QdrantVectorstore:
 
         logger.info("🎯 Tổng số điểm đã nạp: %d", total_points)
 
-    def search(self, collection_name, query, image_description):
-        # ---- 1. Lấy embedding song song ----
+    def search(self, collection_name, query, image_description=None):
         tasks = {}
         if query and query.strip():
             tasks["query"] = query
@@ -238,12 +223,10 @@ class QdrantVectorstore:
                     logger.warning("⚠️ Embed error for %s: %s", name, e)
                     embeddings[name] = None
 
-        # chuẩn bị vectors để truy vấn (bỏ các embedding failed)
         query_vectors = [embeddings.get(k) for k in ("query", "image") if embeddings.get(k)]
         if not query_vectors:
             return {"text": ""}
 
-        # ---- 2. Truy vấn Qdrant song song để giảm round-trip ----
         results_list = []
         def _query_vec(vec):
             try:
@@ -264,7 +247,6 @@ class QdrantVectorstore:
         if not results_list:
             return {"text": ""}
 
-        # ---- 3. Loại trùng nhanh ----
         unique_results = []
         seen = set()
         for res in results_list:
@@ -275,21 +257,18 @@ class QdrantVectorstore:
                 seen.add(key)
                 unique_results.append(res)
 
-        # ---- 4. Lập chỉ mục document source với 1 lần gọi list_objects (nhanh hơn) ----
         text_chunks = []
         doc_map = {}  # filename -> document URL
 
         if self.mode == "prod" and unique_results:
             try:
-                prefix = self.storage_folder or ""
-                # list một lần toàn bộ folder gốc để build map nhanh
+                prefix = ""
                 all_objs = list(self.storage_client.list_objects(self.storage_bucket, prefix))
                 for obj in all_objs:
                     name = obj.get("object_name", "")
                     low = name.lower()
                     if not (low.endswith(".pdf") or low.endswith(".docx")):
                         continue
-                    # lấy folder/filename tương ứng (rel path sau storage_folder)
                     if prefix:
                         rel = name[len(prefix):].lstrip("/")
                     else:
@@ -297,12 +276,13 @@ class QdrantVectorstore:
                     filename_folder = rel.split("/", 1)[0] if rel else ""
                     if filename_folder and filename_folder not in doc_map:
                         scheme = "https" if getattr(self.storage_client, "secure", False) else "http"
-                        url = f"{scheme}://{self.storage_client.endpoint}/{self.storage_bucket}/{name}"
+                        # URL-encode object_name to handle Unicode characters
+                        encoded_name = quote(name, safe="/")
+                        url = f"{scheme}://{self.storage_client.endpoint}/{self.storage_bucket}/{encoded_name}"
                         doc_map[filename_folder] = url
             except Exception as e:
                 logger.error("⚠️ Storage listing error (bulk): %s", e)
 
-        # ---- 5. Build output nhanh bằng join ----
         for res in unique_results:
             payload_text = res.payload.get("text", "")
             if payload_text:
@@ -310,7 +290,8 @@ class QdrantVectorstore:
 
             filename = res.payload.get("filename", "")
             if filename and filename in doc_map:
-                text_chunks.append(f"Document source: {doc_map[filename]}")
+                url = doc_map[filename]
+                text_chunks.append(f"[Document source]({url})")
 
             text_chunks.append("")  # tách block
 
@@ -318,14 +299,16 @@ class QdrantVectorstore:
         return {"text": final_text}
 
 if __name__ == "__main__":
-    dir = os.getenv("DOCUMENT_FOLDER")
+    dir = r"D:\Projects\KnowledgeClassifier\pipelines"
     input_dir = Path(dir) / "input"
     output_dir = Path(dir) / "output"
     output_dir.mkdir(exist_ok=True)
-    vectorstore = QdrantVectorstore(host="127.0.0.1", port="6333", output_dir=output_dir, mode="dev")
-    print(vectorstore.search(collection_name=os.getenv("COLLECTION_NAME"), query="gann chart", image_description=""))
-    # vectorstore.delete_collection(collection_name=os.getenv("COLLECTION_NAME"))
-    # vectorstore.create_collection(collection_name="keyword_testing")
-    # vectorstore.ingest_to_qdrant(collection_name="tool_use_agent", file_name="scribe_test")
-    # logger.info(vectorstore.search(collection_name="tool_use_agent", query="Hướng dẫn cách đặt xe."))
+
+    vectorstore = QdrantVectorstore(host=os.getenv("QDRANT_HOST", "127.0.0.1"), port=os.getenv("QDRANT_PORT", "6333"), mode="dev", output_dir=str(output_dir))
+
+    collection_name=os.getenv("COLLECTION_NAME")
+    vectorstore.delete_collection(collection_name=collection_name)
+    # vectorstore.create_collection(collection_name=collection_name)
+    # vectorstore.ingest_to_qdrant(collection_name=collection_name, file_name="Gioi_thieu_ve_Ha_Noi")
+    # logger.info(vectorstore.search(collection_name=collection_name, query="Van hoa Ha Noi la gi?"))
     # vectorstore.delete_points_by_filename(collection_name="tool_use_agent", filename="scribetest")

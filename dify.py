@@ -2,10 +2,13 @@
 import requests
 import json
 import os
+import time
 from typing import List
 import uuid
 from dotenv import load_dotenv
 import logging
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 load_dotenv()
 
 # Module-level constants loaded from environment
@@ -175,9 +178,21 @@ def get_chat_history(user_id: str, conversation_id: str, first_id: str = None, l
     headers = {
         "Authorization": f"Bearer {DIFY_API_KEY}"
     }
+    
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
     try:
         logger.debug("Fetching chat history for conversation=%s user=%s", conversation_id, user_id)
-        response = requests.get(url, headers=headers)
+        response = session.get(url, headers=headers, timeout=(5, 30))
         if response.status_code == 200:
             logger.info("Fetched chat history for conversation=%s size=%d", conversation_id, len(response.content))
             return response.json()
@@ -187,6 +202,8 @@ def get_chat_history(user_id: str, conversation_id: str, first_id: str = None, l
     except Exception as e:
         logger.exception("Lỗi khi gọi get_chat_history: %s", e)
         return None
+    finally:
+        session.close()
 
 def get_conversations(user_id: str, last_id: str = None, limit: int = 20, sort_by: str = "-updated_at"):
     """
@@ -210,9 +227,20 @@ def get_conversations(user_id: str, last_id: str = None, limit: int = 20, sort_b
         "Authorization": f"Bearer {DIFY_API_KEY}"
     }
     
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
     try:
         logger.debug("Fetching conversations for user=%s", user_id)
-        response = requests.get(url, headers=headers, params=params)
+        response = session.get(url, headers=headers, params=params, timeout=(5, 30))
         if response.status_code == 200:
             resp_json = response.json()
             logger.info("Fetched %d conversations for user=%s", len(resp_json.get("data", [])), user_id)
@@ -223,6 +251,8 @@ def get_conversations(user_id: str, last_id: str = None, limit: int = 20, sort_b
     except Exception as e:
         logger.exception("Lỗi khi gọi get_conversations: %s", e)
         return None
+    finally:
+        session.close()
 
 def delete_conversation(user_id: str, conversation_id: str):
     """

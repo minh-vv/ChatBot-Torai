@@ -2,7 +2,7 @@ import os
 import logging
 import redis
 from langchain_google_genai import ChatGoogleGenerativeAI
-from Cache.utils import clean_query, hash_query
+from cache.utils import clean_query, hash_query
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -11,24 +11,26 @@ logger = logging.getLogger(__name__)
 
 class RedisCacheMemory:
     def __init__(self, stopwords_path):
+        redis_host = os.getenv("ELASTICACHE_ENDPOINT", "redis")
+        redis_port = int(os.getenv("ELASTICACHE_PORT", "6379"))
         try:
-            self.r = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
+            self.r = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
             # attempt a lightweight ping to detect connectivity early
             try:
                 self.r.ping()
-                logger.info("Connected to Redis at redis:6379")
+                logger.info("Connected to Redis at %s:%s", redis_host, redis_port)
             except Exception:
                 logger.warning("Unable to ping Redis at init; connection may be established later")
         except Exception as e:
             logger.exception("Failed to create Redis client: %s", e)
             # create a fallback client object to avoid AttributeErrors later
-            self.r = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
+            self.r = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
 
-        try:
-            self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("GOOGLE_API_KEY"))
-        except Exception:
-            logger.exception("Failed to initialize LLM model; continuing without model")
-            self.model = None
+        # try:
+        #     self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("GOOGLE_API_KEY"))
+        # except Exception:
+        #     logger.exception("Failed to initialize LLM model; continuing without model")
+        #     self.model = None
 
         self.stopwords = self.get_stopwords(stopwords_path)
 

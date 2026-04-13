@@ -3,10 +3,9 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import PictureItem
-from DocumentExtraction.post_process import process_lines
-from DocumentExtraction.utils import _folder_name_from_filename, parse_image_path
+from document_pipeline.post_process import process_lines
+from document_pipeline.utils import _folder_name_from_filename, parse_image_path
 import mimetypes
-import google.generativeai as genai
 from tqdm import tqdm
 from pathlib import Path
 import os 
@@ -19,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%H:%M:%S"
 )
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
@@ -91,7 +91,7 @@ class DocumentExtraction:
             self.doc_converter = DocumentConverter() 
         result = self.doc_converter.convert(file_path)
 
-        raw_name = result.input.file.stem
+        raw_name = os.path.splitext(os.path.basename(file_path))[0]
         clean_name = _folder_name_from_filename(raw_name)
         file_name = "_".join(clean_name.split())
         md_text = result.document.export_to_markdown()
@@ -224,7 +224,7 @@ class DocumentExtraction:
                 mime_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
             # Lấy tối đa 200 ký tự context (nếu có)
             context_preview = (context_text[-200:]).strip() if context_text else ""
-            prompt = "Hãy mô tả nội dung của bức ảnh một cách ngắn gọn, rõ ràng và đầy đủ thông tin. Đầu ra chỉ chứa thông tin mô tả ảnh"
+            prompt = "Please describe the content of the image concisely, clearly, and comprehensively. The output should only contain the image description."
             if context_preview:
                 prompt = (
                     f"Ngữ cảnh văn bản trước đó:\n{context_preview}\n\n"
