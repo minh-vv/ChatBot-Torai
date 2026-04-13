@@ -6,10 +6,16 @@ import secrets
 
 class User(models.Model):
     """User model with authentication"""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('admin', 'Admin'),
+    ]
+    
     user_id = models.CharField(max_length=100, unique=True, db_index=True)
     email = models.EmailField(unique=True, null=True, blank=True)
     password = models.CharField(max_length=255, null=True, blank=True)
     name = models.CharField(max_length=255, blank=True, default='')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
     auth_token = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -17,6 +23,10 @@ class User(models.Model):
 
     def __str__(self):
         return f"{self.name or self.email or 'User'} ({self.user_id})"
+
+    @property
+    def is_admin(self):
+        return self.role == 'admin'
 
     def set_password(self, raw_password):
         """Hash and set password"""

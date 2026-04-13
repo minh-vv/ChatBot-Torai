@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status
 from django.http import StreamingHttpResponse
+from django.db import models as db_models
 import json
 import uuid
 import re
@@ -30,6 +31,16 @@ def get_user_from_request(request):
         token = auth_header[7:]
         return User.get_user_by_token(token)
     return None
+
+
+def require_admin(request):
+    """Helper to check admin access. Returns (user, error_response) tuple."""
+    user = get_user_from_request(request)
+    if not user:
+        return None, Response({'error': 'Chưa đăng nhập'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not user.is_admin:
+        return None, Response({'error': 'Bạn không có quyền truy cập chức năng này'}, status=status.HTTP_403_FORBIDDEN)
+    return user, None
 
 
 class RegisterView(APIView):
@@ -68,6 +79,7 @@ class RegisterView(APIView):
             'user_id': user.user_id,
             'email': user.email,
             'name': user.name,
+            'role': user.role,
             'token': token
         }, status=status.HTTP_201_CREATED)
 
@@ -100,6 +112,7 @@ class LoginView(APIView):
             'user_id': user.user_id,
             'email': user.email,
             'name': user.name,
+            'role': user.role,
             'token': token
         })
 
@@ -127,6 +140,7 @@ class MeView(APIView):
             'user_id': user.user_id,
             'email': user.email,
             'name': user.name,
+            'role': user.role,
             'created_at': user.created_at
         })
     
@@ -144,7 +158,8 @@ class MeView(APIView):
         return Response({
             'user_id': user.user_id,
             'email': user.email,
-            'name': user.name
+            'name': user.name,
+            'role': user.role
         })
 
 
@@ -668,11 +683,13 @@ class FileDeleteView(APIView):
 # =====================================================
 
 class KnowledgeBaseListView(APIView):
-    """List and create knowledge bases"""
+    """List and create knowledge bases (admin only)"""
     
     def get(self, request):
         """Get list of all knowledge bases"""
-        user = get_user_from_request(request)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         knowledge_bases = KnowledgeBase.objects.filter(is_active=True)
         
@@ -695,9 +712,9 @@ class KnowledgeBaseListView(APIView):
     
     def post(self, request):
         """Create a new knowledge base"""
-        user = get_user_from_request(request)
-        if not user:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         name = request.data.get('name')
         description = request.data.get('description', '')
@@ -733,10 +750,13 @@ class KnowledgeBaseListView(APIView):
 
 
 class KnowledgeBaseDetailView(APIView):
-    """Get, update, delete a specific knowledge base"""
+    """Get, update, delete a specific knowledge base (admin only)"""
     
     def get(self, request, dataset_id):
         """Get knowledge base details"""
+        user, error = require_admin(request)
+        if error:
+            return error
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
             return Response({
@@ -755,9 +775,9 @@ class KnowledgeBaseDetailView(APIView):
     
     def put(self, request, dataset_id):
         """Update knowledge base"""
-        user = get_user_from_request(request)
-        if not user:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
@@ -783,9 +803,9 @@ class KnowledgeBaseDetailView(APIView):
     
     def delete(self, request, dataset_id):
         """Delete knowledge base"""
-        user = get_user_from_request(request)
-        if not user:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
@@ -809,11 +829,14 @@ class KnowledgeBaseDetailView(APIView):
 
 
 class KnowledgeDocumentListView(APIView):
-    """List and upload documents to a knowledge base"""
+    """List and upload documents to a knowledge base (admin only)"""
     parser_classes = (MultiPartParser, FormParser)
     
     def get(self, request, dataset_id):
         """Get list of documents in a knowledge base"""
+        user, error = require_admin(request)
+        if error:
+            return error
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
             documents = kb.documents.all()
@@ -842,9 +865,9 @@ class KnowledgeDocumentListView(APIView):
     
     def post(self, request, dataset_id):
         """Upload a document to knowledge base"""
-        user = get_user_from_request(request)
-        if not user:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
@@ -939,10 +962,13 @@ class KnowledgeDocumentListView(APIView):
 
 
 class KnowledgeDocumentDetailView(APIView):
-    """Get, update, delete a specific document"""
+    """Get, update, delete a specific document (admin only)"""
     
     def get(self, request, dataset_id, document_id):
         """Get document details"""
+        user, error = require_admin(request)
+        if error:
+            return error
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
             doc = kb.documents.get(document_id=document_id)
@@ -968,9 +994,9 @@ class KnowledgeDocumentDetailView(APIView):
     
     def delete(self, request, dataset_id, document_id):
         """Delete a document"""
-        user = get_user_from_request(request)
-        if not user:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        user, error = require_admin(request)
+        if error:
+            return error
         
         try:
             kb = KnowledgeBase.objects.get(dataset_id=dataset_id, is_active=True)
@@ -996,10 +1022,13 @@ class KnowledgeDocumentDetailView(APIView):
 
 
 class KnowledgeStatsView(APIView):
-    """Get overall knowledge base statistics"""
+    """Get overall knowledge base statistics (admin only)"""
     
     def get(self, request):
         """Get statistics for all knowledge bases"""
+        user, error = require_admin(request)
+        if error:
+            return error
         knowledge_bases = KnowledgeBase.objects.filter(is_active=True)
         
         total_documents = sum(kb.document_count for kb in knowledge_bases)
@@ -1037,3 +1066,202 @@ def format_file_size(size_bytes):
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} TB"
+
+
+# =====================================================
+# Admin User Management Views
+# =====================================================
+
+class AdminUserListView(APIView):
+    """List all users and create new user (admin only)"""
+    
+    def get(self, request):
+        admin, error = require_admin(request)
+        if error:
+            return error
+        
+        search = request.query_params.get('search', '').strip()
+        role_filter = request.query_params.get('role', '').strip()
+        
+        users = User.objects.all().order_by('-created_at')
+        
+        if search:
+            users = users.filter(
+                db_models.Q(email__icontains=search) |
+                db_models.Q(name__icontains=search) |
+                db_models.Q(user_id__icontains=search)
+            )
+        if role_filter:
+            users = users.filter(role=role_filter)
+        
+        return Response({
+            'data': [
+                {
+                    'id': u.id,
+                    'user_id': u.user_id,
+                    'email': u.email,
+                    'name': u.name,
+                    'role': u.role,
+                    'is_active': u.is_active,
+                    'created_at': u.created_at.isoformat(),
+                    'conversation_count': u.conversations.count(),
+                }
+                for u in users
+            ],
+            'total': users.count()
+        })
+
+
+class AdminUserDetailView(APIView):
+    """Update or delete a user (admin only)"""
+    
+    def put(self, request, user_id):
+        admin, error = require_admin(request)
+        if error:
+            return error
+        
+        try:
+            target_user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Không tìm thấy người dùng'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Prevent admin from demoting themselves
+        if target_user.id == admin.id:
+            new_role = request.data.get('role')
+            if new_role and new_role != 'admin':
+                return Response({'error': 'Không thể thay đổi quyền của chính mình'}, status=status.HTTP_400_BAD_REQUEST)
+            new_active = request.data.get('is_active')
+            if new_active is not None and not new_active:
+                return Response({'error': 'Không thể vô hiệu hóa chính mình'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        role = request.data.get('role')
+        if role and role in ('user', 'admin'):
+            target_user.role = role
+        
+        is_active = request.data.get('is_active')
+        if is_active is not None:
+            target_user.is_active = is_active
+        
+        name = request.data.get('name')
+        if name is not None:
+            target_user.name = name.strip()
+        
+        target_user.save()
+        
+        return Response({
+            'id': target_user.id,
+            'user_id': target_user.user_id,
+            'email': target_user.email,
+            'name': target_user.name,
+            'role': target_user.role,
+            'is_active': target_user.is_active,
+        })
+    
+    def delete(self, request, user_id):
+        admin, error = require_admin(request)
+        if error:
+            return error
+        
+        try:
+            target_user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Không tìm thấy người dùng'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if target_user.id == admin.id:
+            return Response({'error': 'Không thể xóa chính mình'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        target_user.delete()
+        return Response({'success': True}, status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminFeedbackListView(APIView):
+    """List all message feedbacks for admin review"""
+
+    def get(self, request):
+        admin, error = require_admin(request)
+        if error:
+            return error
+
+        rating_filter = request.query_params.get('rating', '')
+        search = request.query_params.get('search', '').strip()
+        user_filter = request.query_params.get('user_id', '').strip()
+
+        queryset = MessageFeedback.objects.select_related('user').all()
+
+        if rating_filter in ('like', 'dislike'):
+            queryset = queryset.filter(rating=rating_filter)
+
+        if user_filter:
+            queryset = queryset.filter(user__user_id=user_filter)
+
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(comment__icontains=search)
+            )
+
+        feedbacks = queryset.order_by('-created_at')[:500]
+
+        message_ids = [fb.message_id for fb in feedbacks]
+        messages_map = {}
+        for msg in ChatMessage.objects.filter(message_id__in=message_ids):
+            messages_map[msg.message_id] = {
+                'query': msg.query[:300],
+                'answer': msg.answer[:300],
+            }
+
+        data = []
+        for fb in feedbacks:
+            msg_data = messages_map.get(fb.message_id, {})
+            data.append({
+                'id': fb.id,
+                'user_id': fb.user.user_id,
+                'user_name': fb.user.name or fb.user.email or fb.user.user_id,
+                'user_email': fb.user.email or '',
+                'conversation_id': fb.conversation_id,
+                'message_id': fb.message_id,
+                'rating': fb.rating,
+                'comment': fb.comment or '',
+                'query': msg_data.get('query', ''),
+                'answer': msg_data.get('answer', ''),
+                'created_at': fb.created_at.isoformat(),
+            })
+
+        like_count = MessageFeedback.objects.filter(rating='like').count()
+        dislike_count = MessageFeedback.objects.filter(rating='dislike').count()
+        total = like_count + dislike_count
+
+        users_with_feedback = MessageFeedback.objects.values('user__user_id', 'user__name', 'user__email').distinct()
+        users_list = [
+            {
+                'user_id': u['user__user_id'],
+                'name': u['user__name'] or u['user__email'] or u['user__user_id'],
+            }
+            for u in users_with_feedback
+        ]
+
+        return Response({
+            'feedbacks': data,
+            'stats': {
+                'total': total,
+                'likes': like_count,
+                'dislikes': dislike_count,
+            },
+            'users': users_list,
+        })
+
+    def delete(self, request):
+        """Delete a feedback entry by id"""
+        admin, error = require_admin(request)
+        if error:
+            return error
+
+        feedback_id = request.data.get('feedback_id')
+        if not feedback_id:
+            return Response({'error': 'feedback_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            fb = MessageFeedback.objects.get(id=feedback_id)
+            fb.delete()
+            return Response({'success': True}, status=status.HTTP_204_NO_CONTENT)
+        except MessageFeedback.DoesNotExist:
+            return Response({'error': 'Feedback not found'}, status=status.HTTP_404_NOT_FOUND)

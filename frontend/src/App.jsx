@@ -2,7 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
+import UserManagement from './components/UserManagement';
+import FeedbackManagement from './components/FeedbackManagement';
+import ProfilePage from './components/ProfilePage';
 import AuthPage from './components/AuthPage';
+import { useLanguage } from './contexts/LanguageContext';
 import { cn } from './lib/utils';
 import { 
   getUserId, 
@@ -48,6 +52,7 @@ const categorizeByDate = (conversations) => {
 };
 
 function App() {
+  const { t } = useLanguage();
   const [currentView, setCurrentView] = useState('chat');
   const [chatHistory, setChatHistory] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
@@ -101,12 +106,15 @@ function App() {
           setUserId(storedUser.user_id);
           setIsLoggedIn(true);
           
-          // Verify token is still valid
+          // Verify token is still valid and sync role
           const currentUser = await getCurrentUser();
           if (!currentUser) {
             // Token expired, logout
             handleLogout();
             return;
+          }
+          if (currentUser.role) {
+            setUser(prev => ({ ...prev, role: currentUser.role }));
           }
           
           // Load conversations
@@ -166,7 +174,7 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const isAdmin = true; 
+  const isAdmin = user?.role === 'admin';
 
   // Refresh conversations from server
   const refreshConversations = useCallback(async () => {
@@ -196,7 +204,7 @@ function App() {
 
   // Handle deleting a conversation
   const handleDeleteConversation = async (conversationId) => {
-    if (!window.confirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) {
+    if (!window.confirm(t('deleteConversationConfirm'))) {
       return;
     }
     
@@ -210,7 +218,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error deleting conversation:', error);
-      alert('Không thể xóa cuộc trò chuyện. Vui lòng thử lại.');
+      alert(t('deleteConversationError'));
     }
   };
 
@@ -225,7 +233,7 @@ function App() {
       ));
     } catch (error) {
       console.error('Error renaming conversation:', error);
-      alert('Không thể đổi tên cuộc trò chuyện. Vui lòng thử lại.');
+      alert(t('renameConversationError'));
     }
   };
 
@@ -258,7 +266,7 @@ function App() {
       <div className="flex h-screen w-full items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-4 border-[#0E3B8C] border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-600">Đang tải...</p>
+          <p className="text-slate-600">{t('loading')}</p>
         </div>
       </div>
     );
@@ -285,6 +293,9 @@ function App() {
           onRenameConversation={handleRenameConversation}
           isAdmin={isAdmin}
           onOpenAdmin={() => setCurrentView('admin')}
+          onOpenUsers={() => setCurrentView('users')}
+          onOpenFeedback={() => setCurrentView('feedback')}
+          onOpenProfile={() => setCurrentView('profile')}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           user={user}
@@ -296,9 +307,23 @@ function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 relative h-full overflow-hidden flex flex-col w-full">
-        {currentView === 'admin' ? (
+        {currentView === 'admin' && isAdmin ? (
           <AdminDashboard 
             onBack={() => setCurrentView('chat')}
+          />
+        ) : currentView === 'users' && isAdmin ? (
+          <UserManagement 
+            onBack={() => setCurrentView('chat')}
+          />
+        ) : currentView === 'feedback' && isAdmin ? (
+          <FeedbackManagement 
+            onBack={() => setCurrentView('chat')}
+          />
+        ) : currentView === 'profile' ? (
+          <ProfilePage
+            user={user}
+            onBack={() => setCurrentView('chat')}
+            onUserUpdate={(updatedUser) => setUser(updatedUser)}
           />
         ) : (
           <ChatInterface 

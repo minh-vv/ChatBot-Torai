@@ -56,32 +56,32 @@ services:
     volumes:
       - redis_data:/data
 
-  # backend:
-  #   build:
-  #     context: ./backend
-  #   container_name: django_backend
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     - DEBUG=True
-  #     - SECRET_KEY=django-insecure-docker-dev-key
-  #     - ALLOWED_HOSTS=*
-  #   volumes:
-  #     - ./backend:/app
-  #   depends_on:
-  #     - redis
+  backend:
+    build:
+      context: ./backend
+    container_name: django_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=django-insecure-docker-dev-key
+      - ALLOWED_HOSTS=*
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
 
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #   container_name: vite_frontend
-  #   ports:
-  #     - "5173:5173"
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules
-  #   depends_on:
-  #     - backend
+  frontend:
+    build:
+      context: ./frontend
+    container_name: vite_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
       
 volumes:
   qdrant_data:
