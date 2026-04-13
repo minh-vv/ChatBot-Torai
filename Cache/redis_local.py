@@ -2,7 +2,7 @@ import os
 import logging
 import redis
 from langchain_google_genai import ChatGoogleGenerativeAI
-from Cache.utils import clean_query, hash_query
+from cache.utils import clean_query, hash_query
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,11 +24,11 @@ class RedisCacheMemory:
             # create a fallback client object to avoid AttributeErrors later
             self.r = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
 
-        try:
-            self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("GOOGLE_API_KEY"))
-        except Exception:
-            logger.exception("Failed to initialize LLM model; continuing without model")
-            self.model = None
+        # try:
+        #     self.model = ChatGoogleGenerativeAI(model="gemini-2.5-pro", api_key=os.getenv("GOOGLE_API_KEY"))
+        # except Exception:
+        #     logger.exception("Failed to initialize LLM model; continuing without model")
+        #     self.model = None
 
         self.stopwords = self.get_stopwords(stopwords_path)
 

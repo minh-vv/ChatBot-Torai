@@ -4,12 +4,12 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from DocumentExtraction.extract_document import DocumentExtraction
-from DocumentExtraction.chunking import ChunkModule
-from DocumentExtraction.minio_client import MinioClientWrapper
-from DocumentExtraction.s3 import S3ClientWrapper
-from DocumentExtraction.db import QdrantVectorstore
-from DocumentExtraction.utils import _folder_name_from_filename, parse_image_path
+from document_pipeline.extract_document import DocumentExtraction
+from document_pipeline.chunker import ChunkModule
+from document_pipeline.minio_client import MinioClientWrapper
+from document_pipeline.s3 import S3ClientWrapper
+from document_pipeline.vector_db import QdrantVectorstore
+from document_pipeline.utils import _folder_name_from_filename, parse_image_path
 import shutil
 import logging
 import tempfile
@@ -20,8 +20,9 @@ import uuid
 import asyncio
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from Cache.redis_local import RedisCacheMemory
+from cache.redis_local import RedisCacheMemory
 import dify
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -80,7 +81,7 @@ def process_document(file_path, tool_name):    # Lấy tên file đã chuẩn h�
     logger.info(f"Cleaning old vectors for file: {file_name_clean}")
     vectorstore.delete_points_by_filename(collection_name=os.getenv("COLLECTION_NAME"), filename=file_name_clean)
     file_name = extractor.extract_all_infor(file_path, tool_name)
-    chunk_module.chunks_all_text(file_name, tool_name)
+    chunk_module.process(file_name, tool_name)
     vectorstore.ingest_to_qdrant(collection_name=os.getenv("COLLECTION_NAME"), file_name=file_name, tool_name=tool_name)
 
 def process_bytes_upload_and_process(file_bytes: bytes, filename: str, tool_name:str):
@@ -194,7 +195,7 @@ def search(request: Request):
 
 @app.post("/delete-file-object")
 def delete_file(file_name: str, tool_name: str):
-    file_name = _folder_name_from_filename(file_name.split(".")[0])
+    file_name = _folder_name_from_filename(file_name)
     # xóa cache
     cache_memory.delete_all()
     vectorstore.delete_points_by_filename(collection_name=os.getenv("COLLECTION_NAME"), filename=file_name)

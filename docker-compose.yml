@@ -2,15 +2,14 @@ version: "3.9"
 
 services:
   app:
-    image: ngoquan0904/tool_use_agent:1.0
+    image: ngoquan0904/tool_use_agent:2.0
     container_name: document_extraction
     ports:
       - "8888:8888"
     environment:
       DOCUMENT_FOLDER: ${DOCUMENT_FOLDER}
       HF_TOKEN: ${HF_TOKEN}
-      LLM_API: ${LLM_API}
-      MINIO_BUCKET: ${MINIO_BUCKET}
+      STORAGE_BUCKET: ${STORAGE_BUCKET}
       MINIO_HOST: "minio"
       MINIO_PORT: "9000"
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -19,11 +18,9 @@ services:
       QDRANT_HOST: "qdrant"
       QDRANT_PORT: "6333"
       STOPWORD_PATH: "/app/stopwords_path.txt"
-      ELASTICACHE_ENDPOINT: ${ELASTICACHE_ENDPOINT}
-      ELASTICACHE_PORT: "6379"
     volumes:
       - .:/app
-      - D:\Document\Code\Projects\Tool-use_Agent\Cache\stopwords_vi.txt:/app/stopwords_path.txt
+      - .\cache\stopwords_vi.txt:/app/stopwords_path.txt
     depends_on:
       - qdrant
       - minio
@@ -59,32 +56,32 @@ services:
     volumes:
       - redis_data:/data
 
-  backend:
-    build:
-      context: ./backend
-    container_name: django_backend
-    ports:
-      - "8000:8000"
-    environment:
-      - DEBUG=True
-      - SECRET_KEY=django-insecure-docker-dev-key
-      - ALLOWED_HOSTS=*
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - redis
+  # backend:
+  #   build:
+  #     context: ./backend
+  #   container_name: django_backend
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - DEBUG=True
+  #     - SECRET_KEY=django-insecure-docker-dev-key
+  #     - ALLOWED_HOSTS=*
+  #   volumes:
+  #     - ./backend:/app
+  #   depends_on:
+  #     - redis
 
-  frontend:
-    build:
-      context: ./frontend
-    container_name: vite_frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #   container_name: vite_frontend
+  #   ports:
+  #     - "5173:5173"
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - backend
       
 volumes:
   qdrant_data:
