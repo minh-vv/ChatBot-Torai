@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import uuid
 import re
+import os
 
 from .models import UploadedFile, User, Conversation, MessageFeedback, MessageFile, ChatMessage, KnowledgeBase, KnowledgeDocument
 from .dify import (
@@ -18,6 +19,26 @@ from .dify import (
     rename_conversation as dify_rename_conversation,
     submit_message_feedback as dify_submit_feedback,
 )
+
+
+def _rewrite_minio_urls(text):
+    """Rewrite MinIO localhost URLs to relative /minio/ proxy path.
+
+    Prevents browsers from being blocked by CORS loopback policy when the app
+    is accessed via ngrok or any external domain. The nginx /minio/ location
+    already proxies to http://minio:9000/.
+    """
+    if not text:
+        return text
+    minio_port = os.environ.get("MINIO_PORT", "9000")
+    minio_host = os.environ.get("MINIO_HOST", "127.0.0.1")
+    for pattern in [
+        rf'http://localhost:{minio_port}/',
+        rf'http://127\.0\.0\.1:{minio_port}/',
+        rf'http://{re.escape(minio_host)}:{minio_port}/',
+    ]:
+        text = re.sub(pattern, '/minio/', text)
+    return text
 
 
 def get_user_from_request(request):
@@ -340,12 +361,17 @@ class ChatMessageView(APIView):
             
             for chunk in dify_send_chat_message(user_id, conversation_id, query, files):
                 if isinstance(chunk, dict):
-                    # First chunk with conversation_id and message_id
-                    new_conversation_id = chunk.get('conversation_id')
-                    new_message_id = chunk.get('message_id')
-                    answer = chunk.get('answer', '')
-                    full_answer += answer
-                    yield f"data: {json.dumps({'answer': answer, 'conversation_id': new_conversation_id, 'message_id': new_message_id})}\n\n"
+                    # Dify image_file event — forward image URL to frontend
+                    if chunk.get('type') == 'image_file':
+                        yield f"data: {json.dumps({'image_url': chunk['url'], 'image_file_id': chunk.get('file_id')})}\n\n"
+                    else:
+                        # Normal answer chunk with optional conversation_id / message_id
+                        new_conversation_id = chunk.get('conversation_id') or new_conversation_id
+                        if chunk.get('message_id'):
+                            new_message_id = chunk.get('message_id')
+                        answer = chunk.get('answer', '')
+                        full_answer += answer
+                        yield f"data: {json.dumps({'answer': answer, 'conversation_id': chunk.get('conversation_id'), 'message_id': chunk.get('message_id')})}\n\n"
                 else:
                     full_answer += chunk
                     yield f"data: {json.dumps({'answer': chunk})}\n\n"
@@ -443,7 +469,7 @@ class ChatHistoryView(APIView):
                     {
                         "id": msg.message_id,
                         "query": msg.query,
-                        "answer": msg.answer,
+                        "answer": _rewrite_minio_urls(msg.answer),
                         "files": files_by_message.get(msg.message_id, []),
                         "created_at": msg.created_at.isoformat()
                     }
@@ -457,13 +483,15 @@ class ChatHistoryView(APIView):
         result = dify_get_chat_history(user_id, conversation_id, first_id, limit)
         
         if result and result.get('data'):
-            # Enrich each message with local file URLs
+            # Enrich each message with local file URLs and rewrite MinIO URLs
             for msg in result['data']:
                 msg_id = msg.get('id')
                 if msg_id and msg_id in files_by_message:
                     msg['files'] = files_by_message[msg_id]
                 else:
                     msg['files'] = []
+                if 'answer' in msg:
+                    msg['answer'] = _rewrite_minio_urls(msg['answer'])
             
             return Response(result)
         elif result:

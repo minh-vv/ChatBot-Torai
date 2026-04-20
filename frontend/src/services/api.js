@@ -351,7 +351,7 @@ export const deleteUploadedFile = async (fileId) => {
 };
 
 // Send chat message with streaming response
-export const sendChatMessage = async (query, conversationId = '', files = [], onChunk, onComplete, onMessageId) => {
+export const sendChatMessage = async (query, conversationId = '', files = [], onChunk, onComplete, onMessageId, onImageFile) => {
   const userId = getUserId();
 
   try {
@@ -401,6 +401,11 @@ export const sendChatMessage = async (query, conversationId = '', files = [], on
             if (data.answer) {
               fullAnswer += data.answer;
               onChunk && onChunk(data.answer, fullAnswer);
+            }
+
+            // Handle AI-generated image files from Dify message_file events
+            if (data.image_url) {
+              onImageFile && onImageFile(data.image_url, data.image_file_id);
             }
             
             if (data.done) {

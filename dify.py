@@ -114,7 +114,22 @@ def send_chat_message(user_id: str, conversional_id: str, query: str, files: Lis
                         break
                     try:
                         event = json.loads(data)
-                        if "answer" in event:
+                        event_type = event.get("event")
+
+                        # Dify trả về ảnh AI-generated qua event message_file
+                        if event_type == "message_file":
+                            file_type = event.get("type")
+                            url = event.get("url")
+                            if file_type == "image" and url:
+                                logger.info("Received image file from Dify: %s", url)
+                                yield {
+                                    "type": "image_file",
+                                    "url": url,
+                                    "file_id": event.get("id"),
+                                    "belongs_to": event.get("belongs_to", "assistant"),
+                                }
+
+                        elif "answer" in event:
                             answer = event["answer"].replace("🤖", "")
                             message_id = event.get("id")
                             # Nếu conversional_id là rỗng, lấy conversation_id từ event (nếu có)

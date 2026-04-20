@@ -297,6 +297,19 @@ async def dify_upload_image_endpoint(user_id: str, file: UploadFile = File(...))
 def fix_image_paths(text, base_url="http://localhost:8888"):
     if not text:
         return text
+
+    # Rewrite MinIO localhost URLs to go through the nginx /minio/ proxy.
+    # This prevents browsers from being blocked by CORS loopback policy when
+    # the app is accessed via ngrok or any external domain.
+    minio_port = os.getenv("MINIO_PORT", "9000")
+    minio_host = os.getenv("MINIO_HOST", "127.0.0.1")
+    for minio_pattern in [
+        rf'http://localhost:{minio_port}/',
+        rf'http://127\.0\.0\.1:{minio_port}/',
+        rf'http://{re.escape(minio_host)}:{minio_port}/',
+    ]:
+        text = re.sub(minio_pattern, f"{base_url}/minio/", text)
+
     # Pattern to match: ([Image]: D:\...\filename.png) or ([Image]: /app/...)
     def replace_path(match):
         full_match = match.group(0)

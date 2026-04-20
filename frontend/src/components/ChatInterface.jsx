@@ -542,6 +542,18 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
             ));
             currentAiMsgIdRef.current = newAiMsgId; // Update ref so onChunk uses new ID
           }
+        },
+        // onImageFile callback - append AI-generated images to the current AI message
+        (imageUrl) => {
+          const currentId = currentAiMsgIdRef.current;
+          setMessages(prev => prev.map(msg =>
+            msg.id === currentId
+              ? {
+                  ...msg,
+                  aiImages: [...(msg.aiImages || []), { file_url: imageUrl, name: 'AI generated image' }]
+                }
+              : msg
+          ));
         }
       );
     } catch (error) {
@@ -949,6 +961,11 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
                         {msg.role === 'user' && msg.files && msg.files.length > 0 && (
                           <ImageGallery files={msg.files} />
                         )}
+
+                        {/* Display AI-generated images returned by Dify (message_file events) */}
+                        {msg.role === 'ai' && msg.aiImages && msg.aiImages.length > 0 && (
+                          <ImageGallery files={msg.aiImages} />
+                        )}
                         
                         <div className={cn(
                           "markdown-content prose prose-sm sm:prose-base max-w-none break-words",
@@ -962,10 +979,19 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
                           <ReactMarkdown 
                             remarkPlugins={[remarkGfm]}
                             components={{
-                              img: ({node, ...props}) => (
+                              img: ({node, ...props}) => {
+                                // Rewrite MinIO localhost URLs to go through nginx /minio/ proxy.
+                                // Prevents CORS loopback policy errors when accessed via ngrok/external domain.
+                                const rewriteMinioUrl = (url) => {
+                                  if (!url) return url;
+                                  return url.replace(/https?:\/\/(localhost|127\.0\.0\.1):\d+\//g, '/minio/');
+                                };
+                                const src = rewriteMinioUrl(props.src);
+                                return (
                                 <div className="relative group my-6 overflow-hidden rounded-xl border border-slate-200/50 shadow-lg bg-white">
                                   <img 
-                                    {...props} 
+                                    {...props}
+                                    src={src}
                                     className="max-w-full h-auto transition-transform duration-500 group-hover:scale-[1.02] cursor-zoom-in block mx-auto" 
                                     alt={props.alt || 'AI generated image'} 
                                     loading="lazy"
@@ -986,7 +1012,8 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
                                     </div>
                                   )}
                                 </div>
-                              ),
+                                );
+                              },
                               a: ({node, ...props}) => (
                                 <a {...props} className="inline-flex items-center gap-1 text-blue-500 hover:text-blue-600 font-semibold no-underline hover:underline transition-colors" target="_blank" rel="noopener noreferrer">
                                   {props.children}
