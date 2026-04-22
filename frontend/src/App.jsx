@@ -118,18 +118,24 @@ function App() {
     };
   }, [resize, stopResizing]);
 
-  // Check authentication on mount
+  // Check authentication on mount — cancelled flag prevents double-fetch side-effects
   useEffect(() => {
+    let cancelled = false;
+
     const checkAuth = async () => {
       if (isAuthenticated()) {
         const storedUser = getStoredUser();
         if (storedUser) {
-          setUser(storedUser);
-          setUserId(storedUser.user_id);
-          setIsLoggedIn(true);
+          if (!cancelled) {
+            setUser(storedUser);
+            setUserId(storedUser.user_id);
+            setIsLoggedIn(true);
+          }
           
           // Verify token is still valid and sync role
           const currentUser = await getCurrentUser();
+          if (cancelled) return;
+
           if (!currentUser) {
             // Token expired, logout
             handleLogout();
@@ -143,19 +149,22 @@ function App() {
           try {
             const conversations = await getConversations();
             const categorized = categorizeByDate(conversations);
-            setChatHistory(categorized);
-            if (!activeConversationId && categorized.length > 0) {
-              setActiveConversationId(categorized[0].conversation_id);
+            if (!cancelled) {
+              setChatHistory(categorized);
+              if (!activeConversationId && categorized.length > 0) {
+                setActiveConversationId(categorized[0].conversation_id);
+              }
             }
           } catch (error) {
             console.error('Error loading conversations:', error);
           }
         }
       }
-      setIsLoading(false);
+      if (!cancelled) setIsLoading(false);
     };
     
     checkAuth();
+    return () => { cancelled = true; };
   }, []);
 
   // Handle successful authentication
