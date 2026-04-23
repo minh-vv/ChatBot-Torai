@@ -112,9 +112,19 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
   const fileInputRef = useRef(null);
   const currentAiMsgIdRef = useRef(null); // Track current AI message ID for streaming
   const loadRequestIdRef = useRef(0);
+  // Track conversation IDs created by this component instance to avoid a redundant
+  // history reload when the parent updates the conversationId prop after creation.
+  const selfCreatedConversationIdRef = useRef(null);
 
   // Load chat history when conversation changes
   useEffect(() => {
+    // Skip reload when the prop change was triggered by this component creating the
+    // conversation itself — the messages are already displayed in state.
+    if (conversationId && conversationId === selfCreatedConversationIdRef.current) {
+      selfCreatedConversationIdRef.current = null;
+      return;
+    }
+
     const loadHistory = async () => {
       const requestId = ++loadRequestIdRef.current;
       // Clear previous state first
@@ -521,6 +531,9 @@ const ChatInterface = ({ project, conversationId, userId, onConversationCreated,
           
           // If this is a new conversation, notify parent
           if (!currentConversationId && newConversationId) {
+            // Mark as self-created BEFORE calling onConversationCreated so the
+            // useEffect([conversationId]) guard can skip the redundant reload.
+            selfCreatedConversationIdRef.current = newConversationId;
             setCurrentConversationId(newConversationId);
             // Ưu tiên dùng llmTitle nếu có, nếu không thì cắt query
             const finalTitle = llmTitle || (userQuery.slice(0, 50) + (userQuery.length > 50 ? '...' : ''));

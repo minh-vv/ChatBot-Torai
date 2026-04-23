@@ -89,7 +89,9 @@ function App() {
 
   // Responsive Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [chatKey, setChatKey] = useState(Date.now()); // Key to force re-render ChatInterface
+  // stableConversationKey chỉ thay đổi khi user CHỦ ĐỘNG tạo chat mới hoặc chọn conversation khác.
+  // KHÔNG thay đổi khi onConversationCreated được gọi (tránh remount + reload history thừa).
+  const [stableConversationKey, setStableConversationKey] = useState(() => `new-chat-${Date.now()}`);
 
   // Handle Resize Logic
   const startResizing = useCallback((e) => {
@@ -228,7 +230,7 @@ function App() {
   // Handle new chat - reset to empty conversation
   const handleNewChat = () => {
     setActiveConversationId(null);
-    setChatKey(Date.now()); // Force ChatInterface to re-render
+    setStableConversationKey(`new-chat-${Date.now()}`); // Force remount ChatInterface
     navigate(ROUTES.CHAT);
     
     if (window.innerWidth < 768) setIsSidebarOpen(false);
@@ -237,6 +239,7 @@ function App() {
   // Handle selecting a chat from sidebar
   const handleSelectChat = (conversationId) => {
     setActiveConversationId(conversationId);
+    setStableConversationKey(conversationId); // Thay key → remount để load history của conv mới
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -276,6 +279,8 @@ function App() {
   };
 
   // Callback when a new conversation is created from ChatInterface
+  // CHỈ cập nhật sidebar list + highlight — KHÔNG thay stableConversationKey
+  // để tránh remount ChatInterface và gọi lại API history thừa.
   const handleConversationCreated = useCallback((newConversationId, title) => {
     const nowTs = Date.now();
     const newConv = {
@@ -287,7 +292,7 @@ function App() {
     };
     
     setChatHistory(prev => [newConv, ...prev]);
-    setActiveConversationId(newConversationId);
+    setActiveConversationId(newConversationId); // Chỉ highlight sidebar, không thay key
   }, []);
 
   const activeChat = chatHistory.find(c => c.conversation_id === activeConversationId);
@@ -371,7 +376,7 @@ function App() {
           />
         ) : (
           <ChatInterface 
-            key={activeConversationId || `new-chat-${chatKey}`}
+            key={stableConversationKey}
             project={virtualProjectContext}
             conversationId={activeConversationId}
             userId={userId}
